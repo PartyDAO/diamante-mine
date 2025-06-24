@@ -1,9 +1,9 @@
 # Foundry Template [![Open in Gitpod][gitpod-badge]][gitpod] [![Github Actions][gha-badge]][gha] [![Foundry][foundry-badge]][foundry] [![License: MIT][license-badge]][license]
 
-[gitpod]: https://gitpod.io/#https://github.com/PaulRBerg/foundry-template
+[gitpod]: https://gitpod.io/#https://github.com/brianle/diamante-mine
 [gitpod-badge]: https://img.shields.io/badge/Gitpod-Open%20in%20Gitpod-FFB45B?logo=gitpod
-[gha]: https://github.com/PaulRBerg/foundry-template/actions
-[gha-badge]: https://github.com/PaulRBerg/foundry-template/actions/workflows/ci.yml/badge.svg
+[gha]: https://github.com/brianle/diamante-mine/actions
+[gha-badge]: https://github.com/brianle/diamante-mine/actions/workflows/ci.yml/badge.svg
 [foundry]: https://getfoundry.sh/
 [foundry-badge]: https://img.shields.io/badge/Built%20with-Foundry-FFDB1C.svg
 [license]: https://opensource.org/licenses/MIT
@@ -28,9 +28,9 @@ create a new repository with this repo as the initial state.
 Or, if you prefer to install the template manually:
 
 ```sh
-$ forge init --template PaulRBerg/foundry-template my-project
-$ cd my-project
-$ bun install # install Solhint, Prettier, and other Node.js deps
+forge init --template PaulRBerg/foundry-template my-project
+cd my-project
+bun install # install Solhint, Prettier, and other Node.js deps
 ```
 
 If this is your first time with Foundry, check out the
@@ -107,7 +107,7 @@ This is a list of the most frequently needed commands.
 Build the contracts:
 
 ```sh
-$ forge build
+forge build
 ```
 
 ### Clean
@@ -115,7 +115,7 @@ $ forge build
 Delete the build artifacts and cache directories:
 
 ```sh
-$ forge clean
+forge clean
 ```
 
 ### Compile
@@ -123,7 +123,7 @@ $ forge clean
 Compile the contracts:
 
 ```sh
-$ forge build
+forge build
 ```
 
 ### Coverage
@@ -131,7 +131,7 @@ $ forge build
 Get a test coverage report:
 
 ```sh
-$ forge coverage
+forge coverage
 ```
 
 ### Deploy
@@ -139,7 +139,7 @@ $ forge coverage
 Deploy to Anvil:
 
 ```sh
-$ forge script script/Deploy.s.sol --broadcast --fork-url http://localhost:8545
+forge script script/Deploy.s.sol --broadcast --fork-url http://localhost:8545
 ```
 
 For this script to work, you need to have a `MNEMONIC` environment variable set to a valid
@@ -153,7 +153,7 @@ For instructions on how to deploy to a testnet or mainnet, check out the
 Format the contracts:
 
 ```sh
-$ forge fmt
+forge fmt
 ```
 
 ### Gas Usage
@@ -161,7 +161,7 @@ $ forge fmt
 Get a gas report:
 
 ```sh
-$ forge test --gas-report
+forge test --gas-report
 ```
 
 ### Lint
@@ -169,7 +169,7 @@ $ forge test --gas-report
 Lint the contracts:
 
 ```sh
-$ bun run lint
+bun run lint
 ```
 
 ### Test
@@ -177,7 +177,7 @@ $ bun run lint
 Run the tests:
 
 ```sh
-$ forge test
+forge test
 ```
 
 ### Test Coverage
@@ -185,7 +185,7 @@ $ forge test
 Generate test coverage and output result to the terminal:
 
 ```sh
-$ bun run test:coverage
+bun run test:coverage
 ```
 
 ### Test Coverage Report
@@ -194,7 +194,7 @@ Generate test coverage with lcov report (you'll have to open the `./coverage/ind
 simply copy paste the path):
 
 ```sh
-$ bun run test:coverage:report
+bun run test:coverage:report
 ```
 
 > [!NOTE]
