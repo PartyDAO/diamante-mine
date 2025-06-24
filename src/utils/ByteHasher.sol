@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.30;
 
 library ByteHasher {
     function hashToField(bytes memory data) internal pure returns (uint256) {
