@@ -9,7 +9,7 @@ import { ERC20Mock } from "../tests/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract DeployUpgradeableDiamanteMine is Script {
-    function run() external returns (address) {
+    function run() external returns (address[] memory proxies) {
         vm.startBroadcast();
 
         // Deploy mock tokens
@@ -29,37 +29,46 @@ contract DeployUpgradeableDiamanteMine is Script {
         uint256 maxBonusReward = 50 ether;
         uint256 referralBonusBps = 500; // 5%
         uint256 miningInterval = 1 days;
-        string memory appId = "app_2f15cba47775504177f6fa2729103ad6";
         string memory actionId = "mine";
 
-        // Prepare initialization data
-        bytes memory data = abi.encodeWithSelector(
-            DiamanteMineV1.initialize.selector,
-            msg.sender,
-            diamante,
-            oro,
-            miningFeeInOro,
-            baseReward,
-            maxBonusReward,
-            referralBonusBps,
-            miningInterval,
-            worldId,
-            appId,
-            actionId
-        );
+        string[] memory appIds = new string[](2);
+        appIds[0] = "app_44080323ee897f20dfbacdd30cedf2a8";
+        appIds[1] = "app_2f15cba47775504177f6fa2729103ad6";
 
-        // Deploy proxy
-        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), data);
-        console.log("DiamanteMine proxy deployed to:", address(proxy));
+        proxies = new address[](appIds.length);
 
-        // Fund the DiamanteMine contract with rewards
-        uint256 initialFunding = 1_000_000 ether;
-        diamante.mint(address(proxy), initialFunding);
+        for (uint256 i = 0; i < appIds.length; i++) {
+            string memory appId = appIds[i];
+            console.log("Deploying DiamanteMine for appId:", appId);
 
-        console.log("Funded DiamanteMine with %s DIAMANTE", initialFunding / 1e18);
+            // Prepare initialization data
+            bytes memory data = abi.encodeWithSelector(
+                DiamanteMineV1.initialize.selector,
+                msg.sender,
+                diamante,
+                oro,
+                miningFeeInOro,
+                baseReward,
+                maxBonusReward,
+                referralBonusBps,
+                miningInterval,
+                worldId,
+                appId,
+                actionId
+            );
+
+            // Deploy proxy
+            ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), data);
+            console.log("DiamanteMine proxy deployed to:", address(proxy));
+            proxies[i] = address(proxy);
+
+            // Fund the DiamanteMine contract with rewards
+            uint256 initialFunding = 1_000_000 ether;
+            diamante.mint(address(proxy), initialFunding);
+
+            console.log("Funded DiamanteMine with %s DIAMANTE", initialFunding / 1e18);
+        }
 
         vm.stopBroadcast();
-
-        return address(proxy);
     }
 }
