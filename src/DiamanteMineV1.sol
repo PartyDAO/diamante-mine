@@ -226,6 +226,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     //                                    ADMIN
     //////////////////////////////////////////////////////////////////////////////*/
 
+    // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(address newImplementation) internal virtual override onlyOwner { }
 
     function setMiningFeeInOro(uint256 newFee) external onlyOwner {
