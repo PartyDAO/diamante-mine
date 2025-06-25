@@ -3,11 +3,13 @@ pragma solidity ^0.8.30;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { ByteHasher } from "./utils/ByteHasher.sol";
 import { IWorldID } from "./interfaces/IWorldID.sol";
 
-contract DiamanteMine is Ownable {
+contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
 
@@ -41,10 +43,10 @@ contract DiamanteMine is Ownable {
 
     uint256 private constant MAX_BPS = 10_000;
 
-    IERC20 public immutable DIAMANTE;
-    IERC20 public immutable ORO;
-    IWorldID internal immutable WORLD_ID;
-    uint256 internal immutable EXTERNAL_NULLIFIER;
+    IERC20 public DIAMANTE;
+    IERC20 public ORO;
+    IWorldID internal WORLD_ID;
+    uint256 internal EXTERNAL_NULLIFIER;
     uint256 internal constant GROUP_ID = 1;
 
     uint256 public miningInterval;
@@ -59,11 +61,17 @@ contract DiamanteMine is Ownable {
 
     uint256 public activeMiners;
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                  INITIALIZE
     //////////////////////////////////////////////////////////////////////////////*/
 
-    constructor(
+    function initialize(
+        address _initialOwner,
         IERC20 _diamante,
         IERC20 _oro,
         uint256 _miningFeeInOro,
@@ -75,8 +83,12 @@ contract DiamanteMine is Ownable {
         string memory _appId,
         string memory _actionId
     )
-        Ownable(msg.sender)
+        public
+        initializer
     {
+        __Ownable_init(_initialOwner);
+        __UUPSUpgradeable_init();
+
         DIAMANTE = _diamante;
         ORO = _oro;
         miningFeeInOro = _miningFeeInOro;
@@ -91,6 +103,10 @@ contract DiamanteMine is Ownable {
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    VIEW
     //////////////////////////////////////////////////////////////////////////////*/
+
+    function version() external pure virtual returns (string memory) {
+        return "1.0.0";
+    }
 
     function minReward() public view returns (uint256) {
         return baseReward;
@@ -168,7 +184,7 @@ contract DiamanteMine is Ownable {
         require(block.timestamp >= startedAt + miningInterval, MiningIntervalNotElapsed());
 
         // Calculate reward
-        uint256 randomBonus = (maxBonusReward * (block.timestamp % 7)) / 6;
+        uint256 randomBonus = (maxBonusReward * (activeMiners % 11)) / 10;
         baseRewardAmount = baseReward + randomBonus;
 
         // Check for and apply referral bonus
@@ -209,6 +225,8 @@ contract DiamanteMine is Ownable {
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    ADMIN
     //////////////////////////////////////////////////////////////////////////////*/
+
+    function _authorizeUpgrade(address newImplementation) internal virtual override onlyOwner { }
 
     function setMiningFeeInOro(uint256 newFee) external onlyOwner {
         miningFeeInOro = newFee;

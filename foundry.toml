@@ -14,6 +14,8 @@ script = "script"
 solc = "0.8.30"
 src = "src"
 test = "tests"
+lib = "node_modules"
+via_ir = true
 
 [profile.ci]
 fuzz = { runs = 10_000 }
