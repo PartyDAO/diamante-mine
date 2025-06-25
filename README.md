@@ -1,160 +1,76 @@
-# Foundry Template [![Open in Gitpod][gitpod-badge]][gitpod] [![Github Actions][gha-badge]][gha] [![Foundry][foundry-badge]][foundry] [![License: MIT][license-badge]][license]
+# Diamante Mine
 
-[gitpod]: https://gitpod.io/#https://github.com/brianle/diamante-mine
-[gitpod-badge]: https://img.shields.io/badge/Gitpod-Open%20in%20Gitpod-FFB45B?logo=gitpod
-[gha]: https://github.com/brianle/diamante-mine/actions
-[gha-badge]: https://github.com/brianle/diamante-mine/actions/workflows/ci.yml/badge.svg
-[foundry]: https://getfoundry.sh/
-[foundry-badge]: https://img.shields.io/badge/Built%20with-Foundry-FFDB1C.svg
-[license]: https://opensource.org/licenses/MIT
-[license-badge]: https://img.shields.io/badge/License-MIT-blue.svg
+## Overview
 
-A Foundry-based template for developing Solidity smart contracts, with sensible defaults.
+A smart contract for a mini-app that allows users to "mine" the `DIAMANTE` token. It's designed to create utility for the `ORO` token by allowing users to spend it to initiate a mining session. In return, users receive `DIAMANTE`, a fixed-supply token, with the reward amount determined by a pseudo-random mechanism based on network participation.
 
-## What's Inside
+The contract includes a social referral feature, World ID integration for Sybil resistance, and is built using the UUPS upgradeable proxy pattern to allow for future logic updates.
 
-- [Forge](https://github.com/foundry-rs/foundry/blob/master/forge): compile, test, fuzz, format, and deploy smart
-  contracts
-- [Bun]: Foundry defaults to git submodules, but this template uses Node.js packages for managing dependencies
-- [Forge Std](https://github.com/foundry-rs/forge-std): collection of helpful contracts and utilities for testing
-- [Prettier](https://github.com/prettier/prettier): code formatter for non-Solidity files
-- [Solhint](https://github.com/protofire/solhint): linter for Solidity code
+## Core Concepts
 
-## Getting Started
+The contract facilitates a simple mining game loop:
 
-Click the [`Use this template`](https://github.com/PaulRBerg/foundry-template/generate) button at the top of the page to
-create a new repository with this repo as the initial state.
-
-Or, if you prefer to install the template manually:
-
-```sh
-forge init --template PaulRBerg/foundry-template my-project
-cd my-project
-bun install # install Solhint, Prettier, and other Node.js deps
-```
-
-If this is your first time with Foundry, check out the
-[installation](https://github.com/foundry-rs/foundry#installation) instructions.
+1. **Start Mining**: A user spends `ORO` and provides a World ID proof to begin mining.
+2. **Remind a Friend**: When starting mining, the user can nominate another user to "remind." If the reminded user also starts a mining session within the mining interval, the original user receives a bonus.
+3. **Finish Mining**: After the mining interval has passed, the user can call the `finishMining` function to claim their `DIAMANTE` reward.
+4. **Reward Calculation**:
+    * **Base Reward**: A base reward is calculated with a degree of unpredictability but not random.
+    * **Referral Bonus**: If the user's reminded friend successfully starts a mining session, a percentage-based bonus is added to the base reward.
 
 ## Features
 
-This template builds upon the frameworks and libraries mentioned above, so please consult their respective documentation
-for details about their specific features.
+* **UUPS Upgradeable**: Utilizes the ERC1967 UUPS proxy pattern for seamless logic upgrades.
+* **World ID Integration**: Ensures that each person can only mine once per day, preventing Sybil attacks.
+* **Configurable Parameters**: Contract parameters such as mining fee, reward amounts, and referral bonus percentages are configurable by the owner.
 
-For example, if you're interested in exploring Foundry in more detail, you should look at the
-[Foundry Book](https://book.getfoundry.sh). In particular, you may be interested in reading the
-[Writing Tests](https://book.getfoundry.sh/forge/writing-tests.html) tutorial.
+## Key Functions
 
-### Sensible Defaults
+* `startMining(root, nullifierHash, proof, userToRemind)`: Initiates a mining session for the `msg.sender`. Requires a valid World ID proof and transfers `miningFeeInOro` from the user.
+* `finishMining()`: Allows a user to claim their rewards after the `miningInterval` has passed. Calculates the final reward (including any referral bonus) and transfers the `DIAMANTE` tokens.
 
-This template comes with a set of sensible default configurations for you to use. These defaults can be found in the
-following files:
+## Development
 
-```text
-├── .editorconfig
-├── .gitignore
-├── .prettierignore
-├── .prettierrc.yml
-├── .solhint.json
-├── foundry.toml
-└── remappings.txt
+This project uses [Foundry](https://getfoundry.sh/).
+
+### Setup
+
+```sh
+npm install
 ```
-
-### VSCode Integration
-
-This template is IDE agnostic, but for the best user experience, you may want to use it in VSCode alongside Nomic
-Foundation's [Solidity extension](https://marketplace.visualstudio.com/items?itemName=NomicFoundation.hardhat-solidity).
-
-For guidance on how to integrate a Foundry project in VSCode, please refer to this
-[guide](https://book.getfoundry.sh/config/vscode).
-
-### GitHub Actions
-
-This template comes with GitHub Actions pre-configured. Your contracts will be linted and tested on every push and pull
-request made to the `main` branch.
-
-You can edit the CI script in [.github/workflows/ci.yml](./.github/workflows/ci.yml).
-
-## Installing Dependencies
-
-Foundry typically uses git submodules to manage dependencies, but this template uses Node.js packages because
-[submodules don't scale](https://twitter.com/PaulRBerg/status/1736695487057531328).
-
-This is how to install dependencies:
-
-1. Install the dependency using your preferred package manager, e.g. `bun install dependency-name`
-   - Use this syntax to install from GitHub: `bun install github:username/repo-name`
-2. Add a remapping for the dependency in [remappings.txt](./remappings.txt), e.g.
-   `dependency-name=node_modules/dependency-name`
-
-Note that OpenZeppelin Contracts is pre-installed, so you can follow that as an example.
-
-## Writing Tests
-
-To write a new test contract, you start by importing `Test` from `forge-std`, and then you inherit it in your test
-contract. Forge Std comes with a pre-instantiated [cheatcodes](https://book.getfoundry.sh/cheatcodes/) environment
-accessible via the `vm` property. If you would like to view the logs in the terminal output, you can add the `-vvv` flag
-and use [console.log](https://book.getfoundry.sh/faq?highlight=console.log#how-do-i-use-consolelog).
-
-This template comes with an example test contract [Foo.t.sol](./tests/Foo.t.sol)
-
-## Usage
-
-This is a list of the most frequently needed commands.
 
 ### Build
 
-Build the contracts:
-
 ```sh
 forge build
 ```
 
-### Clean
-
-Delete the build artifacts and cache directories:
+### Test
 
 ```sh
-forge clean
+forge test
 ```
 
-### Compile
-
-Compile the contracts:
+To view logs, add the `-vvv` flag:
 
 ```sh
-forge build
-```
-
-### Coverage
-
-Get a test coverage report:
-
-```sh
-forge coverage
+forge test -vvv
 ```
 
 ### Deploy
 
-Deploy to Anvil:
+The deployment script `script/DeployUpgradeable.s.sol` handles the deployment of the implementation contract and the ERC1967 proxy.
 
-```sh
-forge script script/Deploy.s.sol --broadcast --fork-url http://localhost:8545
-```
+To deploy to a local Anvil node:
 
-For this script to work, you need to have a `MNEMONIC` environment variable set to a valid
-[BIP39 mnemonic](https://iancoleman.io/bip39/).
+1. Start a local node: `anvil`
+2. Run the deployment script:
+
+    ```sh
+    forge script script/DeployUpgradeable.s.sol --rpc-url localhost --broadcast
+    ```
 
 For instructions on how to deploy to a testnet or mainnet, check out the
 [Solidity Scripting](https://book.getfoundry.sh/tutorials/solidity-scripting.html) tutorial.
-
-### Format
-
-Format the contracts:
-
-```sh
-forge fmt
-```
 
 ### Gas Usage
 
@@ -166,48 +82,16 @@ forge test --gas-report
 
 ### Lint
 
-Lint the contracts:
-
 ```sh
-bun run lint
+npm run lint
 ```
-
-### Test
-
-Run the tests:
-
-```sh
-forge test
-```
-
-### Test Coverage
-
-Generate test coverage and output result to the terminal:
-
-```sh
-bun run test:coverage
-```
-
-### Test Coverage Report
-
-Generate test coverage with lcov report (you'll have to open the `./coverage/index.html` file in your browser, to do so
-simply copy paste the path):
-
-```sh
-bun run test:coverage:report
-```
-
-> [!NOTE]
->
-> This command requires you to have [`lcov`](https://github.com/linux-test-project/lcov) installed on your machine. On
-> macOS, you can install it with Homebrew: `brew install lcov`.
 
 ## Related Efforts
 
-- [foundry-rs/forge-template](https://github.com/foundry-rs/forge-template)
-- [abigger87/femplate](https://github.com/abigger87/femplate)
-- [cleanunicorn/ethereum-smartcontract-template](https://github.com/cleanunicorn/ethereum-smartcontract-template)
-- [FrankieIsLost/forge-template](https://github.com/FrankieIsLost/forge-template)
+* [foundry-rs/forge-template](https://github.com/foundry-rs/forge-template)
+* [abigger87/femplate](https://github.com/abigger87/femplate)
+* [cleanunicorn/ethereum-smartcontract-template](https://github.com/cleanunicorn/ethereum-smartcontract-template)
+* [FrankieIsLost/forge-template](https://github.com/FrankieIsLost/forge-template)
 
 ## License
 
