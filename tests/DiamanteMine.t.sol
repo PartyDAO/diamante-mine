@@ -85,6 +85,9 @@ contract DiamanteMineTest is Test {
     function test_StartMining_Success() public {
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+
+        vm.expectEmit(true, true, true, true);
+        emit DiamanteMine.StartedMining(user1, user2, nullifier);
         diamanteMine.startMining(root, nullifier, proof, user2);
 
         assertEq(oroToken.balanceOf(user1), (1000 * 1e18) - MINING_FEE, "User1 ORO balance should decrease");
@@ -105,6 +108,10 @@ contract DiamanteMineTest is Test {
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
         vm.prank(user1);
+
+        // We can't check data part of event because reward is non-deterministic
+        vm.expectEmit(true, true, true, false);
+        emit DiamanteMine.FinishedMining(user1, address(0), nullifier, 0, 0, 0, false);
         diamanteMine.finishMining();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
 
@@ -180,6 +187,115 @@ contract DiamanteMineTest is Test {
         vm.prank(user1);
         vm.expectRevert(DiamanteMine.MiningIntervalNotElapsed.selector);
         diamanteMine.finishMining();
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- VIEW FUNCTION TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_GetUserMiningState() public {
+        // 1. Initially, user1 is not mining
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMine.MiningState.NotMining));
+
+        // 2. User1 starts mining
+        vm.prank(user1);
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        diamanteMine.startMining(root, nullifier, proof, address(0));
+
+        // 3. Now, user1 is mining
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMine.MiningState.Mining));
+
+        // 4. Time passes, user1 is ready to finish
+        vm.warp(block.timestamp + diamanteMine.miningInterval());
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMine.MiningState.ReadyToFinish));
+
+        // 5. User1 finishes mining
+        vm.prank(user1);
+        diamanteMine.finishMining();
+
+        // 6. Finally, user1 is not mining again
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMine.MiningState.NotMining));
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- CORE LOGIC TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_ActiveMiners_Count() public {
+        assertEq(diamanteMine.activeMiners(), 0, "Initial active miners should be 0");
+
+        // User1 starts mining
+        vm.prank(user1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
+        diamanteMine.startMining(root1, nullifier1, proof1, address(0));
+        assertEq(diamanteMine.activeMiners(), 1, "Active miners should be 1 after user1 starts");
+
+        // User2 starts mining
+        vm.prank(user2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
+        assertEq(diamanteMine.activeMiners(), 2, "Active miners should be 2 after user2 starts");
+
+        // User1 finishes mining
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        vm.prank(user1);
+        diamanteMine.finishMining();
+        assertEq(diamanteMine.activeMiners(), 1, "Active miners should be 1 after user1 finishes");
+
+        // User2 finishes mining
+        vm.prank(user2);
+        diamanteMine.finishMining();
+        assertEq(diamanteMine.activeMiners(), 0, "Active miners should be 0 after user2 finishes");
+    }
+
+    function test_FinishMining_Fail_Referral_Self() public {
+        vm.prank(owner);
+        diamanteMine.setMaxBonusReward(0);
+        vm.stopPrank();
+
+        // User1 starts mining, reminds themselves
+        vm.prank(user1);
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        diamanteMine.startMining(root, nullifier, proof, user1);
+
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+        vm.prank(user1);
+        (, uint256 referralBonus, bool hasBonus) = diamanteMine.finishMining();
+        uint256 finalBalance = diamanteToken.balanceOf(user1);
+
+        assertEq(referralBonus, 0, "Referral bonus should be 0 for self-referral");
+        assertFalse(hasBonus, "hasBonus should be false for self-referral");
+        assertEq(finalBalance - initialBalance, diamanteMine.baseReward(), "Reward should be base reward only");
+    }
+
+    function test_FinishMining_Fail_Referral_TooLate() public {
+        vm.prank(owner);
+        diamanteMine.setMaxBonusReward(0);
+        vm.stopPrank();
+
+        // 1. User1 starts mining, reminds User2
+        vm.prank(user1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
+        diamanteMine.startMining(root1, nullifier1, proof1, user2);
+        uint256 user1StartTime = block.timestamp;
+
+        // 2. User2 starts mining, but *after* User1's referral window has closed
+        vm.warp(user1StartTime + diamanteMine.miningInterval() + 1);
+        vm.prank(user2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
+
+        // 3. User1 finishes mining
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+        vm.prank(user1);
+        (, uint256 referralBonus, bool hasBonus) = diamanteMine.finishMining();
+        uint256 finalBalance = diamanteToken.balanceOf(user1);
+
+        assertEq(referralBonus, 0, "Referral bonus should be 0 for late referral");
+        assertFalse(hasBonus, "hasBonus should be false for late referral");
+        assertEq(finalBalance - initialBalance, diamanteMine.baseReward(), "Reward should be base reward only");
     }
 
     //-//////////////////////////////////////////////////////////////////////////
