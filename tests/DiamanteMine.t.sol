@@ -120,16 +120,19 @@ contract DiamanteMineTest is Test {
 
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
-        vm.prank(user1);
 
         // Expected reward calculation (activeMiners = 1)
         uint256 expectedBonus = (diamanteMine.maxBonusReward() * (1 % 11)) / 10;
         uint256 expectedBaseRewardAmount = diamanteMine.baseReward() + expectedBonus;
         uint256 expectedTotalReward = expectedBaseRewardAmount; // No referral bonus
 
+        uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
+
+        // Prank must be immediately before the state-changing call
+        vm.prank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
-            user1, address(0), nullifier, expectedTotalReward, expectedBaseRewardAmount, 0, false
+            user1, address(0), userNullifier, expectedTotalReward, expectedBaseRewardAmount, 0, false
         );
         diamanteMine.finishMining();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
@@ -142,18 +145,19 @@ contract DiamanteMineTest is Test {
         // 1. Create 5 miners
         uint8 numMiners = 5;
         address firstMiner = address(0);
-        uint256 firstMinerNullifier = 0;
 
         for (uint8 i = 0; i < numMiners; i++) {
             address user = address(uint160(uint256(keccak256(abi.encodePacked("miner", i)))));
             oroToken.mint(user, 1000 * 1e18);
-            vm.prank(user);
-            oroToken.approve(address(diamanteMine), type(uint256).max);
             (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user);
+
+            vm.startPrank(user);
+            oroToken.approve(address(diamanteMine), type(uint256).max);
             diamanteMine.startMining(root, nullifier, proof, address(0));
+            vm.stopPrank();
+
             if (i == 0) {
                 firstMiner = user;
-                firstMinerNullifier = nullifier;
             }
         }
         assertEq(diamanteMine.activeMiners(), numMiners);
@@ -162,13 +166,15 @@ contract DiamanteMineTest is Test {
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
 
         // 3. The first miner created finishes mining
-        vm.prank(firstMiner);
-
         // Expected reward calculation (activeMiners = 5)
         uint256 expectedBonus = (diamanteMine.maxBonusReward() * (numMiners % 11)) / 10;
         uint256 expectedBaseRewardAmount = diamanteMine.baseReward() + expectedBonus;
         uint256 expectedTotalReward = expectedBaseRewardAmount; // No referral bonus
 
+        uint256 firstMinerNullifier = diamanteMine.addressToNullifierHash(firstMiner);
+
+        // Prank must be immediately before the state-changing call
+        vm.prank(firstMiner);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
             firstMiner, address(0), firstMinerNullifier, expectedTotalReward, expectedBaseRewardAmount, 0, false
