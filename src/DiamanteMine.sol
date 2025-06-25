@@ -12,6 +12,22 @@ contract DiamanteMine is Ownable {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////////////////////
+    //                                    EVENTS
+    //////////////////////////////////////////////////////////////////////////////*/
+
+    event StartedMining(address indexed user, address indexed remindedUser, uint256 indexed nullifierHash);
+
+    event FinishedMining(
+        address indexed user,
+        address indexed remindedUser,
+        uint256 indexed nullifierHash,
+        uint256 totalReward,
+        uint256 baseRewardAmount,
+        uint256 referralBonusAmount,
+        bool hasReferralBonus
+    );
+
+    /*//////////////////////////////////////////////////////////////////////////////
     //                                    ERRORS
     //////////////////////////////////////////////////////////////////////////////*/
 
@@ -40,6 +56,8 @@ contract DiamanteMine is Ownable {
     mapping(uint256 nullifierHash => uint256 timestamp) public lastMinedAt;
     mapping(uint256 nullifierHash => address userAddress) public lastRemindedAddress;
     mapping(address userAddress => uint256 nullifierHash) public addressToNullifierHash;
+
+    uint256 public activeMiners;
 
     /*//////////////////////////////////////////////////////////////////////////////
     //                                  INITIALIZE
@@ -83,6 +101,26 @@ contract DiamanteMine is Ownable {
         return (maxBaseReward * (MAX_BPS + referralBonusBps)) / MAX_BPS;
     }
 
+    enum MiningState {
+        NotMining,
+        Mining,
+        ReadyToFinish
+    }
+
+    function getUserMiningState(address user) public view returns (MiningState) {
+        uint256 nullifierHash = addressToNullifierHash[user];
+        uint256 startedAt = lastMinedAt[nullifierHash];
+        if (startedAt == 0) {
+            return MiningState.NotMining;
+        }
+
+        if (block.timestamp >= startedAt + miningInterval) {
+            return MiningState.ReadyToFinish;
+        }
+
+        return MiningState.Mining;
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                     CORE
     //////////////////////////////////////////////////////////////////////////////*/
@@ -95,8 +133,9 @@ contract DiamanteMine is Ownable {
     )
         external
     {
-        if (lastMinedAt[nullifierHash] != 0) {
-            require(block.timestamp - lastMinedAt[nullifierHash] >= miningInterval, MiningIntervalNotElapsed());
+        uint256 lastMined = lastMinedAt[nullifierHash];
+        if (lastMined != 0) {
+            require(block.timestamp - lastMined >= miningInterval, MiningIntervalNotElapsed());
         }
         require(DIAMANTE.balanceOf(address(this)) >= maxReward(), InsufficientBalanceForReward());
 
@@ -104,6 +143,8 @@ contract DiamanteMine is Ownable {
         WORLD_ID.verifyProof(
             root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
         );
+
+        if (lastMined == 0) activeMiners++;
 
         lastMinedAt[nullifierHash] = block.timestamp;
         addressToNullifierHash[msg.sender] = nullifierHash;
@@ -113,9 +154,14 @@ contract DiamanteMine is Ownable {
         }
 
         ORO.safeTransferFrom(msg.sender, address(this), miningFeeInOro);
+
+        emit StartedMining(msg.sender, userToRemind, nullifierHash);
     }
 
-    function finishMining() external {
+    function finishMining()
+        external
+        returns (uint256 baseRewardAmount, uint256 referralBonusAmount, bool hasReferralBonus)
+    {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
         require(startedAt > 0, MiningNotStarted());
@@ -123,7 +169,7 @@ contract DiamanteMine is Ownable {
 
         // Calculate reward
         uint256 randomBonus = (maxBonusReward * (block.timestamp % 7)) / 6;
-        uint256 rewardAmount = baseReward + randomBonus;
+        baseRewardAmount = baseReward + randomBonus;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
@@ -134,15 +180,30 @@ contract DiamanteMine is Ownable {
                 remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval
                     && remindedUser != msg.sender
             ) {
-                rewardAmount = (rewardAmount * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+                referralBonusAmount = (baseRewardAmount * referralBonusBps) / MAX_BPS;
+                hasReferralBonus = true;
             }
         }
+
+        uint256 totalReward = baseRewardAmount + referralBonusAmount;
+
+        if (activeMiners != 0) activeMiners--;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
         delete addressToNullifierHash[msg.sender];
 
-        DIAMANTE.safeTransfer(msg.sender, rewardAmount);
+        DIAMANTE.safeTransfer(msg.sender, totalReward);
+
+        emit FinishedMining(
+            msg.sender,
+            remindedUser,
+            nullifierHash,
+            totalReward,
+            baseRewardAmount,
+            referralBonusAmount,
+            hasReferralBonus
+        );
     }
 
     /*//////////////////////////////////////////////////////////////////////////////
