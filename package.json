@@ -31,6 +31,7 @@
     "build": "forge build",
     "lint": "bun run lint:sol && bun run prettier:check",
     "lint:sol": "forge fmt --check && bun solhint \"{script,src,tests}/**/*.sol\"",
+    "lint:fix": "forge fmt && bun solhint \"{script,src,tests}/**/*.sol\" --fix",
     "prettier:check": "prettier --check \"**/*.{json,md,yml}\"",
     "prettier:write": "prettier --write \"**/*.{json,md,yml}\"",
     "test": "forge test",
