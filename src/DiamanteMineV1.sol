@@ -24,7 +24,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         address indexed remindedUser,
         uint256 indexed nullifierHash,
         uint256 totalReward,
-        uint256 baseRewardAmount,
+        uint256 miningReward,
         uint256 referralBonusAmount,
         bool hasReferralBonus
     );
@@ -36,6 +36,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     error MiningIntervalNotElapsed();
     error InsufficientBalanceForReward();
     error MiningNotStarted();
+    error AlreadyMining();
 
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    STATE
@@ -51,8 +52,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     uint256 public miningInterval;
     uint256 public miningFeeInOro;
-    uint256 public baseReward;
-    uint256 public maxBonusReward;
+    uint256 public minReward;
+    uint256 public extraRewardPerLevel;
     uint256 public referralBonusBps;
 
     mapping(uint256 nullifierHash => uint256 timestamp) public lastMinedAt;
@@ -75,8 +76,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         IERC20 _diamante,
         IERC20 _oro,
         uint256 _miningFeeInOro,
-        uint256 _baseReward,
-        uint256 _maxBonusReward,
+        uint256 _minReward,
+        uint256 _extraRewardPerLevel,
         uint256 _referralBonusBps,
         uint256 _miningInterval,
         IWorldID _worldId,
@@ -92,8 +93,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         DIAMANTE = _diamante;
         ORO = _oro;
         miningFeeInOro = _miningFeeInOro;
-        baseReward = _baseReward;
-        maxBonusReward = _maxBonusReward;
+        minReward = _minReward;
+        extraRewardPerLevel = _extraRewardPerLevel;
         referralBonusBps = _referralBonusBps;
         miningInterval = _miningInterval;
         WORLD_ID = _worldId;
@@ -108,13 +109,17 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         return "1.0.0";
     }
 
-    function minReward() public view returns (uint256) {
-        return baseReward;
+    function maxBonusReward() public view returns (uint256) {
+        // The max bonus is from the highest possible level (10)
+        return extraRewardPerLevel * 10;
+    }
+
+    function maxBaseReward() public view returns (uint256) {
+        return minReward + maxBonusReward();
     }
 
     function maxReward() public view returns (uint256) {
-        uint256 maxBaseReward = baseReward + maxBonusReward;
-        return (maxBaseReward * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+        return (maxBaseReward() * (MAX_BPS + referralBonusBps)) / MAX_BPS;
     }
 
     enum MiningState {
@@ -150,9 +155,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         external
     {
         uint256 lastMined = lastMinedAt[nullifierHash];
-        if (lastMined != 0) {
-            require(block.timestamp - lastMined >= miningInterval, MiningIntervalNotElapsed());
-        }
+        require(lastMined == 0, AlreadyMining());
         require(DIAMANTE.balanceOf(address(this)) >= maxReward(), InsufficientBalanceForReward());
 
         // Verify proof of personhood before any state changes
@@ -160,7 +163,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
         );
 
-        if (lastMined == 0) activeMiners++;
+        activeMiners++;
 
         lastMinedAt[nullifierHash] = block.timestamp;
         addressToNullifierHash[msg.sender] = nullifierHash;
@@ -176,7 +179,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     function finishMining()
         external
-        returns (uint256 baseRewardAmount, uint256 referralBonusAmount, bool hasReferralBonus)
+        returns (uint256 miningReward, uint256 referralBonusAmount, bool hasReferralBonus)
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
@@ -184,8 +187,11 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         require(block.timestamp >= startedAt + miningInterval, MiningIntervalNotElapsed());
 
         // Calculate reward
-        uint256 randomBonus = (maxBonusReward * (activeMiners % 11)) / 10;
-        baseRewardAmount = baseReward + randomBonus;
+        // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
+        // When the last miner finishes, activeMiners will be 1, resulting in a rewardLevel of 0.
+        uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % 11;
+        uint256 randomBonus = extraRewardPerLevel * rewardLevel;
+        miningReward = minReward + randomBonus;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
@@ -196,12 +202,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
                 remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval
                     && remindedUser != msg.sender
             ) {
-                referralBonusAmount = (baseRewardAmount * referralBonusBps) / MAX_BPS;
+                referralBonusAmount = (miningReward * referralBonusBps) / MAX_BPS;
                 hasReferralBonus = true;
             }
         }
 
-        uint256 totalReward = baseRewardAmount + referralBonusAmount;
+        uint256 totalReward = miningReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
 
@@ -212,13 +218,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         DIAMANTE.safeTransfer(msg.sender, totalReward);
 
         emit FinishedMining(
-            msg.sender,
-            remindedUser,
-            nullifierHash,
-            totalReward,
-            baseRewardAmount,
-            referralBonusAmount,
-            hasReferralBonus
+            msg.sender, remindedUser, nullifierHash, totalReward, miningReward, referralBonusAmount, hasReferralBonus
         );
     }
 
@@ -237,12 +237,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         miningInterval = newInterval;
     }
 
-    function setBaseReward(uint256 newBaseReward) external onlyOwner {
-        baseReward = newBaseReward;
+    function setMinReward(uint256 newMinReward) external onlyOwner {
+        minReward = newMinReward;
     }
 
-    function setMaxBonusReward(uint256 newMaxBonusReward) external onlyOwner {
-        maxBonusReward = newMaxBonusReward;
+    function setExtraRewardPerLevel(uint256 newExtraRewardPerLevel) external onlyOwner {
+        extraRewardPerLevel = newExtraRewardPerLevel;
     }
 
     function setReferralBonusBps(uint256 newReferralBonusBps) external onlyOwner {
