@@ -1,14 +1,11 @@
 {
-  "name": "@brianle/diamante-mine",
+  "name": "@PartyDAO/diamante-mine",
   "description": "Diamante Mining Smart Contract",
   "version": "1.0.0",
-  "author": {
-    "name": "brianle",
-    "url": "https://github.com/brianle"
-  },
   "dependencies": {
     "@openzeppelin/contracts": "^5.3.0",
     "@openzeppelin/contracts-upgradeable": "^5.3.0",
+    "@uniswap/permit2": "Uniswap/permit2",
     "solmate": "^6.8.0"
   },
   "devDependencies": {
