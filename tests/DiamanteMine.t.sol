@@ -31,8 +31,8 @@ contract DiamanteMineTest is Test {
 
     uint256 public constant INITIAL_DIAMANTE_SUPPLY = 1_000_000 * 1e18;
     uint256 public constant MINING_FEE = 1 * 1e18;
-    uint256 public constant BASE_REWARD = 0.1 * 1e18;
-    uint256 public constant MAX_BONUS_REWARD = 0.9 * 1e18;
+    uint256 public constant MIN_REWARD = 0.1 * 1e18;
+    uint256 public constant EXTRA_REWARD_PER_LEVEL = 0.09 * 1e18;
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
     uint256 public constant MINING_INTERVAL = 24 hours;
 
@@ -55,8 +55,8 @@ contract DiamanteMineTest is Test {
             diamanteToken,
             oroToken,
             MINING_FEE,
-            BASE_REWARD,
-            MAX_BONUS_REWARD,
+            MIN_REWARD,
+            EXTRA_REWARD_PER_LEVEL,
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
             mockWorldID,
@@ -120,10 +120,11 @@ contract DiamanteMineTest is Test {
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
-        // Expected reward calculation (activeMiners = 1)
-        uint256 expectedBonus = (diamanteMine.maxBonusReward() * (1 % 11)) / 10;
-        uint256 expectedBaseRewardAmount = diamanteMine.baseReward() + expectedBonus;
-        uint256 expectedTotalReward = expectedBaseRewardAmount; // No referral bonus
+        // Expected reward calculation (activeMiners was 1, so rewardLevel is 0)
+        uint256 rewardLevel = (1 - 1) % 11;
+        uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
+        uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
+        uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
 
         uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
 
@@ -131,7 +132,7 @@ contract DiamanteMineTest is Test {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
-            user1, address(0), userNullifier, expectedTotalReward, expectedBaseRewardAmount, 0, false
+            user1, address(0), userNullifier, expectedTotalReward, expectedMiningReward, 0, false
         );
         diamanteMine.finishMining();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
@@ -165,10 +166,12 @@ contract DiamanteMineTest is Test {
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
 
         // 3. The first miner created finishes mining
-        // Expected reward calculation (activeMiners = 5)
-        uint256 expectedBonus = (diamanteMine.maxBonusReward() * (numMiners % 11)) / 10;
-        uint256 expectedBaseRewardAmount = diamanteMine.baseReward() + expectedBonus;
-        uint256 expectedTotalReward = expectedBaseRewardAmount; // No referral bonus
+        // Expected reward calculation
+        uint256 activeMinersBefore = diamanteMine.activeMiners();
+        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
+        uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
+        uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
 
         uint256 firstMinerNullifier = diamanteMine.addressToNullifierHash(firstMiner);
 
@@ -176,25 +179,41 @@ contract DiamanteMineTest is Test {
         vm.prank(firstMiner);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
-            firstMiner, address(0), firstMinerNullifier, expectedTotalReward, expectedBaseRewardAmount, 0, false
+            firstMiner, address(0), firstMinerNullifier, expectedTotalReward, expectedMiningReward, 0, false
         );
         diamanteMine.finishMining();
     }
 
-    function test_Fail_StartMining_TooSoon() public {
+    function test_Fail_StartMining_AlreadyMining() public {
         // 1. User1 starts mining
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
         diamanteMine.startMining(root, nullifier, proof, address(0));
 
-        // 2. Time passes, but not enough
-        vm.warp(block.timestamp + 1 hours);
-
-        // 3. User1 tries to start mining again
+        // 2. User1 tries to start mining again before finishing the first session
         vm.prank(user1);
-        vm.expectRevert(DiamanteMineV1.MiningIntervalNotElapsed.selector);
-        // We use the same nullifier here which would be caught by world id, but we want to test our own check
+        vm.expectRevert(DiamanteMineV1.AlreadyMining.selector);
         diamanteMine.startMining(root, nullifier, proof, address(0));
+    }
+
+    function test_Fail_StartMining_InsufficientDiamante() public {
+        // Withdraw all diamante from the contract
+        vm.startPrank(owner);
+        uint256 balance = diamanteToken.balanceOf(address(diamanteMine));
+        diamanteMine.withdrawERC20(IERC20(address(diamanteToken)), balance);
+        vm.stopPrank();
+
+        // User1 tries to start mining
+        vm.prank(user1);
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        vm.expectRevert(DiamanteMineV1.InsufficientBalanceForReward.selector);
+        diamanteMine.startMining(root, nullifier, proof, address(0));
+    }
+
+    function test_Fail_FinishMining_NotStarted() public {
+        vm.prank(user1);
+        vm.expectRevert(DiamanteMineV1.MiningNotStarted.selector);
+        diamanteMine.finishMining();
     }
 
     function test_Fail_FinishMining_TooSoon() public {
@@ -213,38 +232,69 @@ contract DiamanteMineTest is Test {
     }
 
     function test_FinishMining_Success_WithBonus() public {
-        // Temporarily set maxBonusReward to 0 to make the base reward deterministic for this test
-        vm.prank(owner);
-        diamanteMine.setMaxBonusReward(0);
-        vm.stopPrank();
+        // 1. User1 starts mining, reminds User2. activeMiners will be 1.
+        vm.prank(user1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
+        diamanteMine.startMining(root1, nullifier1, proof1, user2);
+        assertEq(diamanteMine.activeMiners(), 1);
 
+        uint256 startTime = block.timestamp;
+        vm.warp(startTime + 1);
+
+        // 2. User2 starts mining within the window. activeMiners will be 2.
+        vm.prank(user2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
+        assertEq(diamanteMine.activeMiners(), 2);
+
+        // 3. Time passes for User1's session to end
+        vm.warp(startTime + diamanteMine.miningInterval() + 1);
+
+        // 4. User1 finishes mining. activeMiners is 2 when calculating rewards.
+        uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
+
+        uint256 activeMinersBefore = diamanteMine.activeMiners();
+        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
+        uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
+        uint256 expectedReferralBonus = (expectedMiningReward * REFERRAL_BONUS_BPS) / 10_000;
+        uint256 expectedTotalReward = expectedMiningReward + expectedReferralBonus;
+
+        vm.prank(user1);
+        diamanteMine.finishMining();
+        uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
+
+        uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
+        assertEq(rewardReceived, expectedTotalReward, "User1 should receive the boosted reward");
+    }
+
+    function test_FinishMining_NoBonus_ReferralMinedTooLate() public {
         // 1. User1 starts mining, reminds User2
         vm.prank(user1);
         (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
         diamanteMine.startMining(root1, nullifier1, proof1, user2);
 
         uint256 startTime = block.timestamp;
-        vm.warp(startTime + 1);
-
-        // 2. User2 starts mining within the window
+        // 2. User2 mines, but AFTER the referral window for user1 has passed
+        vm.warp(startTime + diamanteMine.miningInterval() + 1);
         vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
         diamanteMine.startMining(root2, nullifier2, proof2, address(0));
 
-        // 3. Time passes for User1's session to end
-        vm.warp(startTime + diamanteMine.miningInterval() + 1);
-
-        // 4. User1 finishes mining
+        // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
+
+        uint256 activeMinersBefore = diamanteMine.activeMiners();
+        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
+        uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
+        uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
+
         vm.prank(user1);
         diamanteMine.finishMining();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
-
         uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
-        uint256 expectedBaseReward = diamanteMine.baseReward();
-        uint256 expectedReferralBonus = (expectedBaseReward * REFERRAL_BONUS_BPS) / 10_000;
-        uint256 expectedReward = expectedBaseReward + expectedReferralBonus;
-        assertEq(rewardReceived, expectedReward, "User1 should receive the exact boosted base reward");
+        assertEq(rewardReceived, expectedTotalReward, "User1 should not receive a referral bonus");
     }
 
     function test_ActiveMiners_Count() public {
@@ -306,32 +356,32 @@ contract DiamanteMineTest is Test {
         diamanteMine.setMiningInterval(newInterval);
     }
 
-    function test_SetBaseReward() public {
+    function test_SetMinReward() public {
         uint256 newReward = 2 * 1e18;
 
         // --- Success ---
         vm.prank(owner);
-        diamanteMine.setBaseReward(newReward);
-        assertEq(diamanteMine.baseReward(), newReward);
+        diamanteMine.setMinReward(newReward);
+        assertEq(diamanteMine.minReward(), newReward);
 
         // --- Fail: Non-Owner ---
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
-        diamanteMine.setBaseReward(newReward);
+        diamanteMine.setMinReward(newReward);
     }
 
-    function test_SetMaxBonusReward() public {
-        uint256 newMaxBonus = 2 * 1e18;
+    function test_SetExtraRewardPerLevel() public {
+        uint256 newExtraReward = 2 * 1e18;
 
         // --- Success ---
         vm.prank(owner);
-        diamanteMine.setMaxBonusReward(newMaxBonus);
-        assertEq(diamanteMine.maxBonusReward(), newMaxBonus);
+        diamanteMine.setExtraRewardPerLevel(newExtraReward);
+        assertEq(diamanteMine.extraRewardPerLevel(), newExtraReward);
 
         // --- Fail: Non-Owner ---
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
-        diamanteMine.setMaxBonusReward(newMaxBonus);
+        diamanteMine.setExtraRewardPerLevel(newExtraReward);
     }
 
     function test_SetReferralBonusBps() public {
