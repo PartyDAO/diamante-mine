@@ -154,9 +154,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     )
         external
     {
-        uint256 lastMined = lastMinedAt[nullifierHash];
-        require(lastMined == 0, AlreadyMining());
-        require(DIAMANTE.balanceOf(address(this)) >= maxReward(), InsufficientBalanceForReward());
+        require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
+        require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
 
         // Verify proof of personhood before any state changes
         WORLD_ID.verifyProof(

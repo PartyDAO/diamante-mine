@@ -197,17 +197,29 @@ contract DiamanteMineTest is Test {
     }
 
     function test_Fail_StartMining_InsufficientDiamante() public {
-        // Withdraw all diamante from the contract
+        // 1. User1 starts mining successfully.
+        vm.prank(user1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
+        diamanteMine.startMining(root1, nullifier1, proof1, address(0));
+        assertEq(diamanteMine.activeMiners(), 1);
+
+        // 2. Withdraw just enough so the contract can't support another miner.
         vm.startPrank(owner);
+        uint256 maxRew = diamanteMine.maxReward();
         uint256 balance = diamanteToken.balanceOf(address(diamanteMine));
-        diamanteMine.withdrawERC20(IERC20(address(diamanteToken)), balance);
+        // Leave just enough for the current active miner, but not enough for two.
+        uint256 amountToWithdraw = balance - maxRew;
+        diamanteMine.withdrawERC20(IERC20(address(diamanteToken)), amountToWithdraw);
         vm.stopPrank();
 
-        // User1 tries to start mining
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        // Check that the balance is now exactly maxReward, which is less than maxReward*2
+        assertEq(diamanteToken.balanceOf(address(diamanteMine)), maxRew);
+
+        // 3. User2 tries to start mining and fails.
+        vm.prank(user2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
         vm.expectRevert(DiamanteMineV1.InsufficientBalanceForReward.selector);
-        diamanteMine.startMining(root, nullifier, proof, address(0));
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
     }
 
     function test_Fail_FinishMining_NotStarted() public {
