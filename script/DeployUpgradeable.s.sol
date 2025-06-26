@@ -25,7 +25,8 @@ contract DeployUpgradeableDiamanteMine is Script {
         IWorldID worldId = IWorldID(0x17B354dD2595411ff79041f930e491A4Df39A278);
         uint256 miningFeeInOro = 1 ether;
         uint256 baseReward = 100 ether;
-        uint256 maxBonusReward = 50 ether;
+        uint256 extraRewardPerLevel = 50 ether;
+        uint256 maxRewardLevel = 10;
         uint256 referralBonusBps = 500; // 5%
         uint256 miningInterval = 1 days;
         string memory actionId = "mine";
@@ -48,7 +49,8 @@ contract DeployUpgradeableDiamanteMine is Script {
                 MOCK_ORO,
                 miningFeeInOro,
                 baseReward,
-                maxBonusReward,
+                extraRewardPerLevel,
+                maxRewardLevel,
                 referralBonusBps,
                 miningInterval,
                 worldId,

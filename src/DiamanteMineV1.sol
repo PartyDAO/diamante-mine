@@ -56,6 +56,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     uint256 public minReward;
     uint256 public extraRewardPerLevel;
     uint256 public referralBonusBps;
+    uint256 public maxRewardLevel;
 
     mapping(uint256 nullifierHash => uint256 timestamp) public lastMinedAt;
     mapping(uint256 nullifierHash => address userAddress) public lastRemindedAddress;
@@ -79,6 +80,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 _miningFeeInOro,
         uint256 _minReward,
         uint256 _extraRewardPerLevel,
+        uint256 _maxRewardLevel,
         uint256 _referralBonusBps,
         uint256 _miningInterval,
         IWorldID _worldId,
@@ -96,6 +98,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         miningFeeInOro = _miningFeeInOro;
         minReward = _minReward;
         extraRewardPerLevel = _extraRewardPerLevel;
+        maxRewardLevel = _maxRewardLevel;
         referralBonusBps = _referralBonusBps;
         miningInterval = _miningInterval;
         WORLD_ID = _worldId;
@@ -106,13 +109,13 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     //                                    VIEW
     //////////////////////////////////////////////////////////////////////////////*/
 
-    function version() external pure virtual returns (string memory) {
-        return "1.0.0";
+    function VERSION() external pure virtual returns (string memory) {
+        return "1.0.2";
     }
 
     function maxBonusReward() public view returns (uint256) {
-        // The max bonus is from the highest possible level (10)
-        return extraRewardPerLevel * 10;
+        // The max bonus assuming highest possible level (maxRewardLevel)
+        return extraRewardPerLevel * maxRewardLevel;
     }
 
     function maxBaseReward() public view returns (uint256) {
@@ -199,7 +202,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         // Calculate reward
         // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
         // When the last miner finishes, activeMiners will be 1, resulting in a rewardLevel of 0.
-        uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % 11;
+        uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % (maxRewardLevel + 1);
         uint256 levelBonus = extraRewardPerLevel * rewardLevel;
         miningReward = minReward + levelBonus;
 
@@ -253,6 +256,10 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     function setExtraRewardPerLevel(uint256 newExtraRewardPerLevel) external onlyOwner {
         extraRewardPerLevel = newExtraRewardPerLevel;
+    }
+
+    function setMaxRewardLevel(uint256 newMaxRewardLevel) external onlyOwner {
+        maxRewardLevel = newMaxRewardLevel;
     }
 
     function setReferralBonusBps(uint256 newReferralBonusBps) external onlyOwner {

@@ -38,6 +38,7 @@ contract DiamanteMineTest is Test {
     uint256 public constant EXTRA_REWARD_PER_LEVEL = 0.09 * 1e18;
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
     uint256 public constant MINING_INTERVAL = 24 hours;
+    uint256 public constant MAX_REWARD_LEVEL = 10;
 
     Permit2 public permit;
 
@@ -65,6 +66,7 @@ contract DiamanteMineTest is Test {
             MINING_FEE,
             MIN_REWARD,
             EXTRA_REWARD_PER_LEVEL,
+            MAX_REWARD_LEVEL,
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
             mockWorldID,
@@ -129,7 +131,7 @@ contract DiamanteMineTest is Test {
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
         // Expected reward calculation (activeMiners was 1, so rewardLevel is 0)
-        uint256 rewardLevel = (1 - 1) % 11;
+        uint256 rewardLevel = (1 - 1) % (MAX_REWARD_LEVEL + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
@@ -176,7 +178,7 @@ contract DiamanteMineTest is Test {
         // 3. The first miner created finishes mining
         // Expected reward calculation
         uint256 activeMinersBefore = diamanteMine.activeMiners();
-        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
@@ -274,7 +276,7 @@ contract DiamanteMineTest is Test {
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
         uint256 activeMinersBefore = diamanteMine.activeMiners();
-        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedReferralBonus = (expectedMiningReward * REFERRAL_BONUS_BPS) / 10_000;
@@ -305,7 +307,7 @@ contract DiamanteMineTest is Test {
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
         uint256 activeMinersBefore = diamanteMine.activeMiners();
-        uint256 rewardLevel = (activeMinersBefore - 1) % 11;
+        uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedMiningReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedTotalReward = expectedMiningReward; // No referral bonus
@@ -404,6 +406,20 @@ contract DiamanteMineTest is Test {
         diamanteMine.setExtraRewardPerLevel(newExtraReward);
     }
 
+    function test_SetMaxRewardLevel() public {
+        uint256 newMaxLevel = 20;
+
+        // --- Success ---
+        vm.prank(owner);
+        diamanteMine.setMaxRewardLevel(newMaxLevel);
+        assertEq(diamanteMine.maxRewardLevel(), newMaxLevel);
+
+        // --- Fail: Non-Owner ---
+        vm.prank(user1);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
+        diamanteMine.setMaxRewardLevel(newMaxLevel);
+    }
+
     function test_SetReferralBonusBps() public {
         uint256 newBps = 2000;
 
@@ -457,7 +473,7 @@ contract DiamanteMineTest is Test {
 
     function test_UpgradeToV2() public {
         // Check initial version
-        assertEq(diamanteMine.version(), "1.0.0");
+        assertEq(diamanteMine.VERSION(), "1.0.2");
 
         // Set some state in V1
         vm.prank(owner);
@@ -479,7 +495,7 @@ contract DiamanteMineTest is Test {
         assertEq(proxyAsV2.miningInterval(), 12 hours, "State (miningInterval) should be preserved after upgrade");
 
         // 2. Check that new V2 functionality is available
-        assertEq(proxyAsV2.version(), "2.0.0", "Version should be updated to 2.0.0");
+        assertEq(proxyAsV2.VERSION(), "2.0.0", "Version should be updated to 2.0.0");
         assertTrue(proxyAsV2.newV2Function(), "New V2 function should be callable");
     }
 
