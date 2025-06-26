@@ -7,19 +7,23 @@ import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
 import { ERC20Mock } from "../tests/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 
 contract DeployUpgradeableDiamanteMine is Script {
+    ISignatureTransfer public PERMIT2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+
     function run() external returns (address[] memory proxies) {
         vm.startBroadcast();
 
         // Deploy mock tokens
+        // TODO: Change to use consistent mock tokens address
         ERC20Mock diamante = new ERC20Mock("T-Diamante", "T-DIAMANTE");
         ERC20Mock oro = new ERC20Mock("T-Oro", "T-ORO");
         console.log("DIAMANTE (mock) deployed to:", address(diamante));
         console.log("ORO (mock) deployed to:", address(oro));
 
         // Deploy implementation
-        DiamanteMineV1 implementation = new DiamanteMineV1();
+        DiamanteMineV1 implementation = new DiamanteMineV1(PERMIT2);
         console.log("DiamanteMine implementation deployed to:", address(implementation));
 
         // Set deployment parameters

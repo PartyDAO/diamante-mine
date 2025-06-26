@@ -8,8 +8,9 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { ByteHasher } from "./utils/ByteHasher.sol";
 import { IWorldID } from "./interfaces/IWorldID.sol";
+import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helper.sol";
 
-contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
+contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
 
@@ -63,7 +64,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     uint256 public activeMiners;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor(ISignatureTransfer _permit2) Permit2Helper(_permit2) {
         _disableInitializers();
     }
 
@@ -150,7 +151,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         uint256 root,
         uint256 nullifierHash,
         uint256[8] calldata proof,
-        address userToRemind
+        address userToRemind,
+        Permit2 memory permit
     )
         external
     {
@@ -171,7 +173,16 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             lastRemindedAddress[nullifierHash] = userToRemind;
         }
 
-        ORO.safeTransferFrom(msg.sender, address(this), miningFeeInOro);
+        PERMIT2.permitTransferFrom(
+            ISignatureTransfer.PermitTransferFrom({
+                permitted: ISignatureTransfer.TokenPermissions({ token: address(ORO), amount: miningFeeInOro }),
+                nonce: permit.nonce,
+                deadline: permit.deadline
+            }),
+            ISignatureTransfer.SignatureTransferDetails({ to: address(this), requestedAmount: miningFeeInOro }),
+            msg.sender,
+            permit.signature
+        );
 
         emit StartedMining(msg.sender, userToRemind, nullifierHash);
     }
