@@ -11,16 +11,11 @@ import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTr
 
 contract DeployUpgradeableDiamanteMine is Script {
     ISignatureTransfer public PERMIT2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+    ERC20Mock MOCK_DIAMANTE = ERC20Mock(0xFc46DC32F6Adb60d65012f7e943c3f29EB867796);
+    ERC20Mock MOCK_ORO = ERC20Mock(0x27Ef8b2c8d843343243D7FF9445D6F7F283d911b);
 
     function run() external returns (address[] memory proxies) {
         vm.startBroadcast();
-
-        // Deploy mock tokens
-        // TODO: Change to use consistent mock tokens address
-        ERC20Mock diamante = new ERC20Mock("T-Diamante", "T-DIAMANTE");
-        ERC20Mock oro = new ERC20Mock("T-Oro", "T-ORO");
-        console.log("DIAMANTE (mock) deployed to:", address(diamante));
-        console.log("ORO (mock) deployed to:", address(oro));
 
         // Deploy implementation
         DiamanteMineV1 implementation = new DiamanteMineV1(PERMIT2);
@@ -36,8 +31,8 @@ contract DeployUpgradeableDiamanteMine is Script {
         string memory actionId = "mine";
 
         string[] memory appIds = new string[](2);
-        appIds[0] = "app_44080323ee897f20dfbacdd30cedf2a8";
-        appIds[1] = "app_2f15cba47775504177f6fa2729103ad6";
+        appIds[0] = "app_44080323ee897f20dfbacdd30cedf2a8"; // Marcus
+        appIds[1] = "app_2f15cba47775504177f6fa2729103ad6"; // Steve
 
         proxies = new address[](appIds.length);
 
@@ -49,8 +44,8 @@ contract DeployUpgradeableDiamanteMine is Script {
             bytes memory data = abi.encodeWithSelector(
                 DiamanteMineV1.initialize.selector,
                 msg.sender,
-                diamante,
-                oro,
+                MOCK_DIAMANTE,
+                MOCK_ORO,
                 miningFeeInOro,
                 baseReward,
                 maxBonusReward,
@@ -68,7 +63,7 @@ contract DeployUpgradeableDiamanteMine is Script {
 
             // Fund the DiamanteMine contract with rewards
             uint256 initialFunding = 1_000_000 ether;
-            diamante.mint(address(proxy), initialFunding);
+            MOCK_DIAMANTE.mint(address(proxy), initialFunding);
 
             console.log("Funded DiamanteMine with %s DIAMANTE", initialFunding / 1e18);
         }
