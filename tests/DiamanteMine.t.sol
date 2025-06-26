@@ -39,6 +39,8 @@ contract DiamanteMineTest is Test {
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
     uint256 public constant MINING_INTERVAL = 24 hours;
 
+    Permit2 public permit;
+
     function setUp() public {
         vm.startPrank(owner);
         // Deploy mock tokens
@@ -103,9 +105,6 @@ contract DiamanteMineTest is Test {
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
-        Permit2 memory permit;
-        permit.deadline = block.timestamp + 1 hours;
-
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.StartedMining(user1, user2, nullifier);
         diamanteMine.startMining(root, nullifier, proof, user2, permit);
@@ -120,8 +119,6 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining, activeMiners will be 1
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        Permit2 memory permit;
-        permit.deadline = block.timestamp + 1 hours;
         diamanteMine.startMining(root, nullifier, proof, address(0), permit);
         assertEq(diamanteMine.activeMiners(), 1);
 
@@ -164,8 +161,6 @@ contract DiamanteMineTest is Test {
 
             vm.startPrank(user);
             oroToken.approve(address(mockPermit2), type(uint256).max);
-            Permit2 memory permit;
-            permit.deadline = block.timestamp + 1 hours;
             diamanteMine.startMining(root, nullifier, proof, address(0), permit);
             vm.stopPrank();
 
@@ -201,8 +196,6 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        Permit2 memory permit;
-        permit.deadline = block.timestamp + 1 hours;
         diamanteMine.startMining(root, nullifier, proof, address(0), permit);
 
         // 2. User1 tries to start mining again before finishing the first session
@@ -215,7 +208,7 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining successfully.
         vm.prank(user1);
         (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, address(0));
+        diamanteMine.startMining(root1, nullifier1, proof1, address(0), permit);
         assertEq(diamanteMine.activeMiners(), 1);
 
         // 2. Withdraw just enough so the contract can't support another miner.
@@ -234,7 +227,7 @@ contract DiamanteMineTest is Test {
         vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
         vm.expectRevert(DiamanteMineV1.InsufficientBalanceForReward.selector);
-        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit);
     }
 
     function test_Fail_FinishMining_NotStarted() public {
@@ -247,8 +240,6 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        Permit2 memory permit;
-        permit.deadline = block.timestamp + 1 hours;
         diamanteMine.startMining(root, nullifier, proof, address(0), permit);
 
         // 2. Time passes, but not enough
@@ -264,9 +255,7 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining, reminds User2. activeMiners will be 1.
         vm.prank(user1);
         (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        Permit2 memory permit1;
-        permit1.deadline = block.timestamp + 1 hours;
-        diamanteMine.startMining(root1, nullifier1, proof1, user2, permit1);
+        diamanteMine.startMining(root1, nullifier1, proof1, user2, permit);
         assertEq(diamanteMine.activeMiners(), 1);
 
         uint256 startTime = block.timestamp;
@@ -275,9 +264,7 @@ contract DiamanteMineTest is Test {
         // 2. User2 starts mining within the window. activeMiners will be 2.
         vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        Permit2 memory permit2;
-        permit2.deadline = block.timestamp + 1 hours;
-        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit);
         assertEq(diamanteMine.activeMiners(), 2);
 
         // 3. Time passes for User1's session to end
@@ -305,14 +292,14 @@ contract DiamanteMineTest is Test {
         // 1. User1 starts mining, reminds User2
         vm.prank(user1);
         (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, user2);
+        diamanteMine.startMining(root1, nullifier1, proof1, user2, permit);
 
         uint256 startTime = block.timestamp;
         // 2. User2 mines, but AFTER the referral window for user1 has passed
         vm.warp(startTime + diamanteMine.miningInterval() + 1);
         vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        diamanteMine.startMining(root2, nullifier2, proof2, address(0));
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit);
 
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
@@ -336,17 +323,13 @@ contract DiamanteMineTest is Test {
         // User1 starts mining
         vm.prank(user1);
         (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        Permit2 memory permit1;
-        permit1.deadline = block.timestamp + 1 hours;
-        diamanteMine.startMining(root1, nullifier1, proof1, address(0), permit1);
+        diamanteMine.startMining(root1, nullifier1, proof1, address(0), permit);
         assertEq(diamanteMine.activeMiners(), 1, "Active miners should be 1");
 
         // User2 starts mining
         vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        Permit2 memory permit2;
-        permit2.deadline = block.timestamp + 1 hours;
-        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), permit);
         assertEq(diamanteMine.activeMiners(), 2, "Active miners should be 2");
 
         // User1 finishes mining
@@ -511,8 +494,6 @@ contract DiamanteMineTest is Test {
         // 2. User1 starts mining
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        Permit2 memory permit;
-        permit.deadline = block.timestamp + 1 hours;
         diamanteMine.startMining(root, nullifier, proof, address(0), permit);
 
         // 3. Now, user1 is mining
