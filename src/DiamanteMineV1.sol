@@ -189,8 +189,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
         // When the last miner finishes, activeMiners will be 1, resulting in a rewardLevel of 0.
         uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % 11;
-        uint256 randomBonus = extraRewardPerLevel * rewardLevel;
-        miningReward = minReward + randomBonus;
+        uint256 levelBonus = extraRewardPerLevel * rewardLevel;
+        miningReward = minReward + levelBonus;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
