@@ -3,16 +3,16 @@ pragma solidity >=0.8.29 <0.9.0;
 
 import { console } from "forge-std/console.sol";
 import { Script } from "forge-std/Script.sol";
-import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
+import { DiamanteMineV1 } from "../src/DiamanteMineV1.dev.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
 import { ERC20Mock } from "../tests/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 
-contract DeployUpgradeableDiamanteMine is Script {
+contract DeployUpgradeableDiamanteMineDev is Script {
     ISignatureTransfer public PERMIT2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
-    ERC20Mock MOCK_DIAMANTE = ERC20Mock(0xFc46DC32F6Adb60d65012f7e943c3f29EB867796);
-    ERC20Mock MOCK_ORO = ERC20Mock(0x27Ef8b2c8d843343243D7FF9445D6F7F283d911b);
+    ERC20Mock public MOCK_DIAMANTE = ERC20Mock(0xFc46DC32F6Adb60d65012f7e943c3f29EB867796);
+    ERC20Mock public MOCK_ORO = ERC20Mock(0x27Ef8b2c8d843343243D7FF9445D6F7F283d911b);
 
     function run() external returns (address[] memory proxies) {
         vm.startBroadcast();
