@@ -47,9 +47,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     IERC20 public DIAMANTE;
     IERC20 public ORO;
-    IWorldID internal WORLD_ID;
-    uint256 internal EXTERNAL_NULLIFIER;
-    uint256 internal constant GROUP_ID = 1;
+    IWorldID public WORLD_ID;
+    uint256 public EXTERNAL_NULLIFIER;
+    uint256 public constant GROUP_ID = 1;
 
     uint256 public miningInterval;
     uint256 public miningFeeInOro;
@@ -93,8 +93,10 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         __Ownable_init(_initialOwner);
         __UUPSUpgradeable_init();
 
+        EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
         DIAMANTE = _diamante;
         ORO = _oro;
+
         miningFeeInOro = _miningFeeInOro;
         minReward = _minReward;
         extraRewardPerLevel = _extraRewardPerLevel;
@@ -102,7 +104,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         referralBonusBps = _referralBonusBps;
         miningInterval = _miningInterval;
         WORLD_ID = _worldId;
-        EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
     }
 
     /*//////////////////////////////////////////////////////////////////////////////
