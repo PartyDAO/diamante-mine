@@ -10,7 +10,7 @@ contract MockDiamanteMineV2 is DiamanteMineV1 {
         _disableInitializers();
     }
 
-    function version() public pure override returns (string memory) {
+    function VERSION() public pure override returns (string memory) {
         return "2.0.0";
     }
 
