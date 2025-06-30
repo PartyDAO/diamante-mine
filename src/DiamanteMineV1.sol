@@ -322,9 +322,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
             // The reward boost is a percentage of the base reward, determined by how much
             // ORO the user mines with, scaling linearly from 0% to the max boost percentage:
             // Boost % = (Amount Mined - Min Amount) / (Max Amount - Min Amount) * Max Boost %
-            uint256 amountInExcess = amountMined - minAmountOro;
-            uint256 amountDelta = maxAmountOro - minAmountOro;
-            boostBps = (amountInExcess * maxRewardBoostBps) / amountDelta;
+            uint256 amountDelta = amountMined - minAmountOro;
+            uint256 maxAmountDelta = maxAmountOro - minAmountOro;
+            boostBps = (amountDelta * maxRewardBoostBps) / maxAmountDelta;
         }
         // Reward Boost = Base Reward * Boost %
         uint256 rewardBoost = (baseReward * boostBps) / MAX_BPS;
