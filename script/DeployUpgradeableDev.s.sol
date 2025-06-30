@@ -31,9 +31,10 @@ contract DeployUpgradeableDiamanteMineDev is Script {
         uint256 miningInterval = 1 days;
         string memory actionId = "mine";
 
-        string[] memory appIds = new string[](2);
-        appIds[0] = "app_44080323ee897f20dfbacdd30cedf2a8"; // Marcus
-        appIds[1] = "app_2f15cba47775504177f6fa2729103ad6"; // Steve
+        string[] memory appIds = new string[](1);
+        appIds[0] = "app_9a78cd265809afb0ce23e956b921428b"; // Staging
+        // appIds[0] = "app_9a78cd265809afb0ce23e956b921428b"; // Marcus
+        // appIds[1] = "app_2f15cba47775504177f6fa2729103ad6"; // Steve
 
         proxies = new address[](appIds.length);
 
