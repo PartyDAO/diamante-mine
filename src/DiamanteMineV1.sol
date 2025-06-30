@@ -22,24 +22,31 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param user The address of the user who started mining.
     /// @param remindedUser The address of the user who was reminded to mine.
     /// @param nullifierHash The nullifier hash of the user's World ID proof.
-    event StartedMining(address indexed user, address indexed remindedUser, uint256 indexed nullifierHash);
+    /// @param amount The amount of ORO the user mined with.
+    event StartedMining(
+        address indexed user, address indexed remindedUser, uint256 indexed nullifierHash, uint256 amount
+    );
 
     /// @notice Emitted when a user finishes mining and claims their reward.
     /// @param user The address of the user who finished mining.
     /// @param remindedUser The address of the user who was reminded.
     /// @param nullifierHash The nullifier hash of the user's World ID proof.
     /// @param totalReward The total reward amount (mining reward + referral bonus).
-    /// @param miningReward The base mining reward amount.
+    /// @param baseReward The base mining reward amount.
+    /// @param rewardBoost The boost to the reward from mining with extra ORO.
     /// @param referralBonusAmount The referral bonus amount.
     /// @param hasReferralBonus A boolean indicating if a referral bonus was given.
+    /// @param amountMined The amount of ORO the user mined with.
     event FinishedMining(
         address indexed user,
         address indexed remindedUser,
         uint256 indexed nullifierHash,
         uint256 totalReward,
-        uint256 miningReward,
+        uint256 baseReward,
+        uint256 rewardBoost,
         uint256 referralBonusAmount,
-        bool hasReferralBonus
+        bool hasReferralBonus,
+        uint256 amountMined
     );
 
     /*//////////////////////////////////////////////////////////////////////////////
@@ -57,6 +64,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     /// @notice Thrown when a user tries to start mining while already mining.
     error AlreadyMining();
+
+    /// @notice Thrown when the provided ORO amount is not within the allowed range.
+    error InvalidOroAmount(uint256 amount, uint256 min, uint256 max);
+
+    /// @notice Thrown when setting min amount higher than max amount.
+    error MinAmountExceedsMaxAmount();
 
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    STATE
@@ -77,8 +90,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     /// @notice The duration a user must wait before they can finish mining.
     uint256 public miningInterval;
-    /// @notice The fee in ORO tokens required to start mining.
-    uint256 public miningFeeInOro;
+    /// @notice The minimum amount in ORO tokens required to start mining.
+    uint256 public minAmountOro;
+    /// @notice The maximum amount in ORO tokens allowed to start mining.
+    uint256 public maxAmountOro;
+    /// @notice The maximum reward boost a user can receive for mining with more ORO, in BPS.
+    uint256 public maxRewardBoostBps;
     /// @notice The minimum reward a user can receive for mining.
     uint256 public minReward;
     /// @notice The extra reward a user can receive for each level. The level is based on the number of active miners.
@@ -92,6 +109,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     mapping(uint256 nullifierHash => uint256 timestamp) public lastMinedAt;
     /// @notice Maps a nullifier hash to the address of the user they reminded.
     mapping(uint256 nullifierHash => address userAddress) public lastRemindedAddress;
+    /// @notice Maps a nullifier hash to the amount of ORO the user is mining with.
+    mapping(uint256 nullifierHash => uint256 amount) public amountOroMinedWith;
     /// @notice Maps a user's address to their World ID nullifier hash.
     mapping(address userAddress => uint256 nullifierHash) public addressToNullifierHash;
 
@@ -111,7 +130,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param _initialOwner The initial owner of the contract.
     /// @param _diamante The address of the DIAMANTE token.
     /// @param _oro The address of the ORO token.
-    /// @param _miningFeeInOro The fee in ORO to start mining.
+    /// @param _minAmountOro The minimum amount in ORO to start mining.
+    /// @param _maxAmountOro The maximum amount in ORO to start mining.
+    /// @param _maxRewardBoostBps The maximum reward boost in BPS.
     /// @param _minReward The minimum reward for mining.
     /// @param _extraRewardPerLevel The extra reward per level.
     /// @param _maxRewardLevel The maximum reward level.
@@ -124,7 +145,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         address _initialOwner,
         IERC20 _diamante,
         IERC20 _oro,
-        uint256 _miningFeeInOro,
+        uint256 _minAmountOro,
+        uint256 _maxAmountOro,
+        uint256 _maxRewardBoostBps,
         uint256 _minReward,
         uint256 _extraRewardPerLevel,
         uint256 _maxRewardLevel,
@@ -140,11 +163,15 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         __Ownable_init(_initialOwner);
         __UUPSUpgradeable_init();
 
+        if (_minAmountOro > _maxAmountOro) revert MinAmountExceedsMaxAmount();
+
         EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
         DIAMANTE = _diamante;
         ORO = _oro;
 
-        miningFeeInOro = _miningFeeInOro;
+        minAmountOro = _minAmountOro;
+        maxAmountOro = _maxAmountOro;
+        maxRewardBoostBps = _maxRewardBoostBps;
         minReward = _minReward;
         extraRewardPerLevel = _extraRewardPerLevel;
         maxRewardLevel = _maxRewardLevel;
@@ -160,7 +187,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Returns the contract version.
     /// @return The contract version string.
     function VERSION() external pure virtual returns (string memory) {
-        return "1.0.2";
+        return "1.1.0";
     }
 
     /// @notice Calculates the maximum possible bonus reward.
@@ -179,7 +206,10 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Calculates the maximum possible total reward including referral bonus.
     /// @return The maximum total reward amount.
     function maxReward() public view returns (uint256) {
-        return (maxBaseReward() * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+        // Boosted Max Reward = Max Base Reward * (1 + Max Boost %)
+        uint256 boosted = (maxBaseReward() * (MAX_BPS + maxRewardBoostBps)) / MAX_BPS;
+        // Total Max Reward = Boosted Max Reward * (1 + Referral Bonus %)
+        return (boosted * (MAX_BPS + referralBonusBps)) / MAX_BPS;
     }
 
     /// @notice Represents the mining state of a user.
@@ -216,18 +246,25 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param nullifierHash A unique identifier for the user's proof.
     /// @param proof The zero-knowledge proof of personhood.
     /// @param userToRemind The address of a user to remind, who might provide a referral bonus.
+    /// @param amount The amount of ORO to use for mining.
     /// @param permit A Permit2 struct for approving the ORO token transfer.
     function startMining(
         uint256 root,
         uint256 nullifierHash,
         uint256[8] calldata proof,
         address userToRemind,
+        uint256 amount,
         Permit2 memory permit
     )
         external
     {
-        require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
-        require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
+        if (lastMinedAt[nullifierHash] != 0) revert AlreadyMining();
+        if (amount < minAmountOro || amount > maxAmountOro) {
+            revert InvalidOroAmount(amount, minAmountOro, maxAmountOro);
+        }
+        if (DIAMANTE.balanceOf(address(this)) < maxReward() * (activeMiners + 1)) {
+            revert InsufficientBalanceForReward();
+        }
 
         // Verify proof of personhood before any state changes
         WORLD_ID.verifyProof(
@@ -237,6 +274,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         activeMiners++;
 
         lastMinedAt[nullifierHash] = block.timestamp;
+        amountOroMinedWith[nullifierHash] = amount;
         addressToNullifierHash[msg.sender] = nullifierHash;
 
         if (userToRemind != address(0)) {
@@ -245,38 +283,52 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
         PERMIT2.permitTransferFrom(
             ISignatureTransfer.PermitTransferFrom({
-                permitted: ISignatureTransfer.TokenPermissions({ token: address(ORO), amount: miningFeeInOro }),
+                permitted: ISignatureTransfer.TokenPermissions({ token: address(ORO), amount: amount }),
                 nonce: permit.nonce,
                 deadline: permit.deadline
             }),
-            ISignatureTransfer.SignatureTransferDetails({ to: address(this), requestedAmount: miningFeeInOro }),
+            ISignatureTransfer.SignatureTransferDetails({ to: address(this), requestedAmount: amount }),
             msg.sender,
             permit.signature
         );
 
-        emit StartedMining(msg.sender, userToRemind, nullifierHash);
+        emit StartedMining(msg.sender, userToRemind, nullifierHash, amount);
     }
 
     /// @notice Finishes the mining process and claims the reward.
     /// @dev The user must have been mining for at least `miningInterval`.
-    /// @return miningReward The amount of DIAMANTE tokens earned from mining.
+    /// @return boostedReward The amount of DIAMANTE tokens earned from mining, including boost.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
         external
-        returns (uint256 miningReward, uint256 referralBonusAmount, bool hasReferralBonus)
+        returns (uint256 boostedReward, uint256 referralBonusAmount, bool hasReferralBonus)
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
-        require(startedAt > 0, MiningNotStarted());
-        require(block.timestamp >= startedAt + miningInterval, MiningIntervalNotElapsed());
+        if (startedAt == 0) revert MiningNotStarted();
+        if (block.timestamp < startedAt + miningInterval) revert MiningIntervalNotElapsed();
 
         // Calculate reward
         // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
         // When the last miner finishes, activeMiners will be 1, resulting in a rewardLevel of 0.
         uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % (maxRewardLevel + 1);
         uint256 levelBonus = extraRewardPerLevel * rewardLevel;
-        miningReward = minReward + levelBonus;
+        uint256 baseReward = minReward + levelBonus;
+
+        uint256 amountMined = amountOroMinedWith[nullifierHash];
+        uint256 boostBps = 0;
+        if (maxAmountOro > minAmountOro) {
+            // The reward boost is a percentage of the base reward, determined by how much
+            // ORO the user mines with, scaling linearly from 0% to the max boost percentage:
+            // Boost % = (Amount Mined - Min Amount) / (Max Amount - Min Amount) * Max Boost %
+            uint256 amountInExcess = amountMined - minAmountOro;
+            uint256 amountDelta = maxAmountOro - minAmountOro;
+            boostBps = (amountInExcess * maxRewardBoostBps) / amountDelta;
+        }
+        // Reward Boost = Base Reward * Boost %
+        uint256 rewardBoost = (baseReward * boostBps) / MAX_BPS;
+        boostedReward = baseReward + rewardBoost;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
@@ -287,23 +339,32 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
                 remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval
                     && remindedUser != msg.sender
             ) {
-                referralBonusAmount = (miningReward * referralBonusBps) / MAX_BPS;
+                referralBonusAmount = (boostedReward * referralBonusBps) / MAX_BPS;
                 hasReferralBonus = true;
             }
         }
 
-        uint256 totalReward = miningReward + referralBonusAmount;
+        uint256 totalReward = boostedReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
         delete addressToNullifierHash[msg.sender];
+        delete amountOroMinedWith[nullifierHash];
 
         DIAMANTE.safeTransfer(msg.sender, totalReward);
 
         emit FinishedMining(
-            msg.sender, remindedUser, nullifierHash, totalReward, miningReward, referralBonusAmount, hasReferralBonus
+            msg.sender,
+            remindedUser,
+            nullifierHash,
+            totalReward,
+            baseReward,
+            rewardBoost,
+            referralBonusAmount,
+            hasReferralBonus,
+            amountMined
         );
     }
 
@@ -314,10 +375,24 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     // solhint-disable-next-line no-empty-blocks
     function _authorizeUpgrade(address newImplementation) internal virtual override onlyOwner { }
 
-    /// @notice Sets the mining fee in ORO tokens.
-    /// @param newFee The new mining fee.
-    function setMiningFeeInOro(uint256 newFee) external onlyOwner {
-        miningFeeInOro = newFee;
+    /// @notice Sets the minimum mining amount in ORO tokens.
+    /// @param newAmount The new minimum mining amount.
+    function setMinAmountOro(uint256 newAmount) external onlyOwner {
+        if (newAmount > maxAmountOro) revert MinAmountExceedsMaxAmount();
+        minAmountOro = newAmount;
+    }
+
+    /// @notice Sets the maximum mining amount in ORO tokens.
+    /// @param newAmount The new maximum mining amount.
+    function setMaxAmountOro(uint256 newAmount) external onlyOwner {
+        if (newAmount < minAmountOro) revert MinAmountExceedsMaxAmount();
+        maxAmountOro = newAmount;
+    }
+
+    /// @notice Sets the maximum reward boost in BPS.
+    /// @param newRewardBoostBps The new maximum reward boost in BPS.
+    function setMaxRewardBoostBps(uint256 newRewardBoostBps) external onlyOwner {
+        maxRewardBoostBps = newRewardBoostBps;
     }
 
     /// @notice Sets the mining interval.
