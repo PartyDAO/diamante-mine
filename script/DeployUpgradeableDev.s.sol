@@ -23,7 +23,8 @@ contract DeployUpgradeableDiamanteMineDev is Script {
 
         // Set deployment parameters
         IWorldID worldId = IWorldID(0x17B354dD2595411ff79041f930e491A4Df39A278);
-        uint256 miningFeeInOro = 1 ether;
+        uint256 minAmountOro = 1 ether;
+        uint256 maxAmountOro = 10 ether;
         uint256 baseReward = 100 ether;
         uint256 extraRewardPerLevel = 50 ether;
         uint256 maxRewardLevel = 10;
@@ -31,10 +32,10 @@ contract DeployUpgradeableDiamanteMineDev is Script {
         uint256 miningInterval = 1 days;
         string memory actionId = "mine";
 
-        string[] memory appIds = new string[](1);
+        string[] memory appIds = new string[](3);
         appIds[0] = "app_9a78cd265809afb0ce23e956b921428b"; // Staging
-        // appIds[0] = "app_9a78cd265809afb0ce23e956b921428b"; // Marcus
-        // appIds[1] = "app_2f15cba47775504177f6fa2729103ad6"; // Steve
+        appIds[1] = "app_9a78cd265809afb0ce23e956b921428b"; // Marcus
+        appIds[2] = "app_2f15cba47775504177f6fa2729103ad6"; // Steve
 
         proxies = new address[](appIds.length);
 
@@ -48,7 +49,8 @@ contract DeployUpgradeableDiamanteMineDev is Script {
                 msg.sender,
                 MOCK_DIAMANTE,
                 MOCK_ORO,
-                miningFeeInOro,
+                minAmountOro,
+                maxAmountOro,
                 baseReward,
                 extraRewardPerLevel,
                 maxRewardLevel,
