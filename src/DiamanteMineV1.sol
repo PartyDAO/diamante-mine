@@ -240,14 +240,14 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param root The root of the Merkle tree of World ID identities.
     /// @param nullifierHash A unique identifier for the user's proof.
     /// @param proof The zero-knowledge proof of personhood.
-    /// @param userToRemind The address of a user to remind, who might provide a referral bonus.
+    /// @param referralData Encoded data containing addresses of users to remind (ABI-encoded address array).
     /// @param amount The amount of ORO to use for mining.
     /// @param permit A Permit2 struct for approving the ORO token transfer.
     function startMining(
         uint256 root,
         uint256 nullifierHash,
         uint256[8] calldata proof,
-        address userToRemind,
+        bytes calldata referralData,
         uint256 amount,
         Permit2 memory permit
     )
@@ -272,6 +272,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         amountOroMinedWith[nullifierHash] = amount;
         addressToNullifierHash[msg.sender] = nullifierHash;
 
+        // Decode referral data to extract friend addresses
+        address userToRemind = _decodeReferralData(referralData);
         if (userToRemind != address(0)) {
             lastRemindedAddress[nullifierHash] = userToRemind;
         }
@@ -418,5 +420,20 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param amount The amount of tokens to withdraw.
     function withdrawERC20(IERC20 token, uint256 amount) external onlyOwner {
         token.safeTransfer(owner(), amount);
+    }
+
+    /// Decodes referral data to extract addresses.
+    function _decodeReferralData(bytes calldata referralData) internal pure returns (address) {
+        if (referralData.length == 0) {
+            return address(0);
+        }
+
+        address[] memory referralAddresses = abi.decode(referralData, (address[]));
+
+        if (referralAddresses.length == 0) {
+            return address(0);
+        }
+
+        return referralAddresses[0];
     }
 }
