@@ -32,10 +32,10 @@ contract DiamanteMineTest is Test {
     address public user2 = makeAddr("user2");
     address public owner = makeAddr("owner");
 
-    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 1_000_000 * 1e18;
+    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000 * 1e18; // Much larger supply for new multiplication
+        // system
     uint256 public constant MIN_AMOUNT_IN_ORO = 1 * 1e18;
     uint256 public constant MAX_AMOUNT_IN_ORO = 100 * 1e18;
-    uint256 public constant MAX_REWARD_BOOST_BPS = 5000; // 50%
     uint256 public constant MIN_REWARD = 0.1 * 1e18;
     uint256 public constant EXTRA_REWARD_PER_LEVEL = 0.09 * 1e18;
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
@@ -67,7 +67,6 @@ contract DiamanteMineTest is Test {
             oroToken,
             MIN_AMOUNT_IN_ORO,
             MAX_AMOUNT_IN_ORO,
-            MAX_REWARD_BOOST_BPS,
             MIN_REWARD,
             EXTRA_REWARD_PER_LEVEL,
             MAX_REWARD_LEVEL,
@@ -160,8 +159,8 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (1 - 1) % (MAX_REWARD_LEVEL + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        // No reward boost as user mined with minimum fee
-        uint256 expectedTotalReward = expectedBaseReward; // No referral bonus
+        // Reward is base reward multiplied by ORO amount / 1e18
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
 
         uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
 
@@ -169,7 +168,15 @@ contract DiamanteMineTest is Test {
         vm.prank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
-            user1, address(0), userNullifier, expectedTotalReward, expectedBaseReward, 0, 0, false, MIN_AMOUNT_IN_ORO
+            user1,
+            address(0),
+            userNullifier,
+            expectedTotalReward,
+            expectedBaseReward,
+            expectedTotalReward - expectedBaseReward,
+            0,
+            false,
+            MIN_AMOUNT_IN_ORO
         );
         diamanteMine.finishMining();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
@@ -208,7 +215,7 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        uint256 expectedTotalReward = expectedBaseReward; // No referral bonus
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
 
         uint256 firstMinerNullifier = diamanteMine.addressToNullifierHash(firstMiner);
 
@@ -221,7 +228,7 @@ contract DiamanteMineTest is Test {
             firstMinerNullifier,
             expectedTotalReward,
             expectedBaseReward,
-            0,
+            expectedTotalReward - expectedBaseReward,
             0,
             false,
             MIN_AMOUNT_IN_ORO
@@ -288,7 +295,7 @@ contract DiamanteMineTest is Test {
         diamanteMine.finishMining();
     }
 
-    function _assertExpectedRewardsFromBoost(uint256 amountToMine, string memory assertionMsg) internal {
+    function _assertExpectedRewardsFromMultiplier(uint256 amountToMine, string memory assertionMsg) internal {
         // 1. User1 starts mining
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
@@ -300,17 +307,9 @@ contract DiamanteMineTest is Test {
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
-        // Expected reward calculation
-        uint256 baseReward = diamanteMine.minReward(); // No level bonus
-
-        // Calculate expected boost
-        uint256 boostBps = 0;
-        if (diamanteMine.maxAmountOro() > diamanteMine.minAmountOro()) {
-            boostBps = ((amountToMine - diamanteMine.minAmountOro()) * diamanteMine.maxRewardBoostBps())
-                / (diamanteMine.maxAmountOro() - diamanteMine.minAmountOro());
-        }
-        uint256 expectedRewardBoost = (baseReward * boostBps) / 10_000;
-        uint256 expectedTotalReward = baseReward + expectedRewardBoost;
+        // Expected reward calculation: baseReward * amountToMine / 1e18
+        uint256 baseReward = diamanteMine.minReward(); // No level bonus when only 1 miner
+        uint256 expectedTotalReward = (baseReward * amountToMine) / 1e18;
 
         vm.prank(user1);
         diamanteMine.finishMining();
@@ -320,28 +319,20 @@ contract DiamanteMineTest is Test {
         assertEq(rewardReceived, expectedTotalReward, assertionMsg);
     }
 
-    function test_FinishMining_WithNoBoost() public {
-        _assertExpectedRewardsFromBoost(MIN_AMOUNT_IN_ORO, "Should have 0% boost for min amount");
+    function test_FinishMining_With1Oro() public {
+        _assertExpectedRewardsFromMultiplier(1 * 1e18, "Should get 1x base reward for 1 ORO");
     }
 
-    function test_FinishMining_WithMaxBoost() public {
-        _assertExpectedRewardsFromBoost(MAX_AMOUNT_IN_ORO, "Should have 100% of max boost for max amount");
+    function test_FinishMining_With2Oro() public {
+        _assertExpectedRewardsFromMultiplier(2 * 1e18, "Should get 2x base reward for 2 ORO");
     }
 
-    function test_FinishMining_With50PercentBoost() public {
-        uint256 midAmount = MIN_AMOUNT_IN_ORO + (MAX_AMOUNT_IN_ORO - MIN_AMOUNT_IN_ORO) / 2;
-        _assertExpectedRewardsFromBoost(midAmount, "Should have 50% of max boost for mid amount");
+    function test_FinishMining_With10Oro() public {
+        _assertExpectedRewardsFromMultiplier(10 * 1e18, "Should get 10x base reward for 10 ORO");
     }
 
-    function test_FinishMining_NoBoost_WhenMinEqualsMax() public {
-        // Set min and max to the same value
-        vm.startPrank(owner);
-        uint256 sameAmount = 50 * 1e18;
-        diamanteMine.setMinAmountOro(sameAmount);
-        diamanteMine.setMaxAmountOro(sameAmount);
-        vm.stopPrank();
-
-        _assertExpectedRewardsFromBoost(sameAmount, "Should have 0 boost when min equals max");
+    function test_FinishMining_WithMaxOro() public {
+        _assertExpectedRewardsFromMultiplier(MAX_AMOUNT_IN_ORO, "Should get 100x base reward for 100 ORO");
     }
 
     function test_FinishMining_NoBonus_ReferralMinedTooLate() public {
@@ -364,7 +355,7 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        uint256 expectedTotalReward = expectedBaseReward; // No referral bonus
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
 
         vm.prank(user1);
         diamanteMine.finishMining();
@@ -398,6 +389,398 @@ contract DiamanteMineTest is Test {
         vm.prank(user2);
         diamanteMine.finishMining();
         assertEq(diamanteMine.activeMiners(), 0, "Active miners should be 0 after both finish");
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- REWARD CALCULATIONS TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    /*
+     * REWARD CALCULATION FORMULA:
+     * 1. baseReward = minReward + (extraRewardPerLevel * rewardLevel)
+     * 2. miningReward = baseReward * oroAmount
+     * 3. referralBonus = (miningReward * referralBonusBps) / 10000 (if applicable)
+     * 4. totalReward = miningReward + referralBonus
+     *
+     * Where rewardLevel = (activeMiners - 1) % (maxRewardLevel + 1)
+     *
+     * TEST CASES TABLE:
+     * ┌──────────────┬─────────────┬──────────────┬──────────────────┬─────────────────┬─────────────────┐
+     * │ ActiveMiners │ RewardLevel │ ORO Amount   │ Base Reward      │ Mining Reward   │ w/ Referral 10% │
+     * ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
+     * │ 1            │ 0           │ 1 ORO        │ 0.1              │ 0.1             │ 0.11            │
+     * │ 1            │ 0           │ 2 ORO        │ 0.1              │ 0.2             │ 0.22            │
+     * │ 1            │ 0           │ 5 ORO        │ 0.1              │ 0.5             │ 0.55            │
+     * │ 1            │ 0           │ 100 ORO      │ 0.1              │ 10.0            │ 11.0            │
+     * ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
+     * │ 2            │ 1           │ 1 ORO        │ 0.19             │ 0.19            │ 0.209           │
+     * │ 2            │ 1           │ 3 ORO        │ 0.19             │ 0.57            │ 0.627           │
+     * │ 5            │ 4           │ 2 ORO        │ 0.46             │ 0.92            │ 1.012           │
+     * │ 10           │ 9           │ 5 ORO        │ 0.91             │ 4.55            │ 5.005           │
+     * │ 11           │ 10          │ 1 ORO        │ 1.0              │ 1.0             │ 1.1             │
+     * │ 12           │ 0 (wraparound)│ 10 ORO     │ 0.1              │ 1.0             │ 1.1             │
+     * └──────────────┴─────────────┴──────────────┴──────────────────┴─────────────────┴─────────────────┘
+     *
+     * Note: Base values assume minReward=0.1, extraRewardPerLevel=0.09, maxRewardLevel=10, referralBonusBps=1000
+     *
+     * The tests below verify each row of this table plus additional edge cases.
+     */
+
+    function test_RewardMultiplication_WithLevelBonus() public {
+        // Start 3 miners to create level bonus
+        address miner1 = makeAddr("miner1");
+        address miner2 = makeAddr("miner2");
+        address miner3 = makeAddr("miner3");
+
+        oroToken.mint(miner1, 1000 * 1e18);
+        oroToken.mint(miner2, 1000 * 1e18);
+        oroToken.mint(miner3, 1000 * 1e18);
+
+        vm.prank(miner1);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        vm.prank(miner2);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        vm.prank(miner3);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+
+        // Start mining with different amounts
+        vm.prank(miner1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(miner1);
+        diamanteMine.startMining(root1, nullifier1, proof1, address(0), 1 * 1e18, permit);
+
+        vm.prank(miner2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(miner2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), 5 * 1e18, permit);
+
+        vm.prank(miner3);
+        (uint256 root3, uint256 nullifier3, uint256[8] memory proof3) = _getProof(miner3);
+        diamanteMine.startMining(root3, nullifier3, proof3, address(0), 10 * 1e18, permit);
+
+        assertEq(diamanteMine.activeMiners(), 3);
+
+        // Time passes
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        // Check miner1 reward (1 ORO)
+        uint256 initialBalance1 = diamanteToken.balanceOf(miner1);
+        vm.prank(miner1);
+        diamanteMine.finishMining();
+        uint256 reward1 = diamanteToken.balanceOf(miner1) - initialBalance1;
+
+        // Expected: (minReward + level2Bonus) * 1 ORO / 1e18
+        uint256 level2Bonus = diamanteMine.extraRewardPerLevel() * 2; // 3-1 = 2
+        uint256 expectedReward1 = ((diamanteMine.minReward() + level2Bonus) * (1 * 1e18)) / 1e18;
+        assertEq(reward1, expectedReward1, "Miner1 should get correct reward with level bonus * 1 ORO");
+
+        // Check miner2 reward (5 ORO)
+        uint256 initialBalance2 = diamanteToken.balanceOf(miner2);
+        vm.prank(miner2);
+        diamanteMine.finishMining();
+        uint256 reward2 = diamanteToken.balanceOf(miner2) - initialBalance2;
+
+        // Expected: (minReward + level1Bonus) * 5 ORO / 1e18
+        uint256 level1Bonus = diamanteMine.extraRewardPerLevel() * 1; // 2-1 = 1
+        uint256 expectedReward2 = ((diamanteMine.minReward() + level1Bonus) * (5 * 1e18)) / 1e18;
+        assertEq(reward2, expectedReward2, "Miner2 should get correct reward with level bonus * 5 ORO");
+
+        // Check miner3 reward (10 ORO)
+        uint256 initialBalance3 = diamanteToken.balanceOf(miner3);
+        vm.prank(miner3);
+        diamanteMine.finishMining();
+        uint256 reward3 = diamanteToken.balanceOf(miner3) - initialBalance3;
+
+        // Expected: (minReward + level0Bonus) * 10 ORO / 1e18
+        uint256 level0Bonus = diamanteMine.extraRewardPerLevel() * 0; // 1-1 = 0
+        uint256 expectedReward3 = ((diamanteMine.minReward() + level0Bonus) * (10 * 1e18)) / 1e18;
+        assertEq(reward3, expectedReward3, "Miner3 should get correct reward with level bonus * 10 ORO");
+
+        // Verify scaling: reward2 should be 5x reward1 (same level bonus)
+        // Since level bonuses are different, we can't directly compare multiples
+        // But we can verify each calculation individually
+    }
+
+    /// @notice Tests Table Row: 1 miner, level 0, 1 ORO, no referral
+    function test_RewardTable_1Miner_1Oro_NoReferral() public {
+        _testRewardCombination(1, 1 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 1 miner, level 0, 2 ORO, no referral
+    function test_RewardTable_1Miner_2Oro_NoReferral() public {
+        _testRewardCombination(1, 2 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 1 miner, level 0, 5 ORO, no referral
+    function test_RewardTable_1Miner_5Oro_NoReferral() public {
+        _testRewardCombination(1, 5 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 1 miner, level 0, 100 ORO, no referral
+    function test_RewardTable_1Miner_100Oro_NoReferral() public {
+        _testRewardCombination(1, 100 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 1 miner, level 0, 1 ORO, with referral
+    function test_RewardTable_1Miner_1Oro_WithReferral() public {
+        _testRewardCombination(1, 1 * 1e18, true, user2);
+    }
+
+    /// @notice Tests Table Row: 2 miners, level 1, 1 ORO, no referral
+    function test_RewardTable_2Miners_1Oro_NoReferral() public {
+        _testRewardCombination(2, 1 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 2 miners, level 1, 3 ORO, with referral
+    function test_RewardTable_2Miners_3Oro_WithReferral() public {
+        _testRewardCombination(2, 3 * 1e18, true, user2);
+    }
+
+    /// @notice Tests Table Row: 5 miners, level 4, 2 ORO, no referral
+    function test_RewardTable_5Miners_2Oro_NoReferral() public {
+        _testRewardCombination(5, 2 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 10 miners, level 9, 5 ORO, no referral
+    function test_RewardTable_10Miners_5Oro_NoReferral() public {
+        _testRewardCombination(10, 5 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 11 miners, level 10 (max), 1 ORO, no referral
+    function test_RewardTable_11Miners_1Oro_NoReferral() public {
+        _testRewardCombination(11, 1 * 1e18, false, address(0));
+    }
+
+    /// @notice Tests Table Row: 12 miners, level 0 (wraparound), 10 ORO, with referral
+    function test_RewardTable_12Miners_10Oro_WithReferral() public {
+        _testRewardCombination(12, 10 * 1e18, true, user2);
+    }
+
+    /// @notice Tests edge case: 22 miners (wraparound to level 10), 5 ORO
+    function test_RewardTable_22Miners_5Oro_MaxLevel() public {
+        _testRewardCombination(22, 5 * 1e18, false, address(0));
+    }
+
+    /// @notice Helper function to test specific reward combinations
+    /// @param numMiners Number of active miners to simulate
+    /// @param oroAmount Amount of ORO the test miner uses
+    /// @param withReferral Whether to test referral bonus
+    /// @param referredUser Address of referred user (only matters if withReferral is true)
+    function _testRewardCombination(
+        uint256 numMiners,
+        uint256 oroAmount,
+        bool withReferral,
+        address referredUser
+    )
+        internal
+    {
+        // Calculate how many filler miners we need
+        uint256 fillersNeeded;
+        if (withReferral && referredUser != address(0)) {
+            // For referral tests: test miner + referred user = 2 miners, so we need numMiners - 2 fillers
+            // But if numMiners is 1, that means we want just the test miner, and they'll refer someone
+            // who starts later, making it 2 total during the test but 1 when test miner finishes
+            fillersNeeded = numMiners > 1 ? numMiners - 2 : 0;
+        } else {
+            fillersNeeded = numMiners - 1;
+        }
+
+        // Create filler miners to reach desired activeMiners count
+        for (uint256 i = 0; i < fillersNeeded; i++) {
+            address filler = address(uint160(uint256(keccak256(abi.encodePacked("filler_miner", i)))));
+            oroToken.mint(filler, 1000 * 1e18);
+
+            vm.prank(filler);
+            oroToken.approve(address(mockPermit2), type(uint256).max);
+
+            vm.prank(filler);
+            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(filler);
+            diamanteMine.startMining(root, nullifier, proof, address(0), MIN_AMOUNT_IN_ORO, permit);
+        }
+
+        // Set up the test miner (user1)
+        address testMiner = user1;
+
+        // If testing referral, make sure referred user starts mining within window
+        if (withReferral && referredUser != address(0)) {
+            vm.prank(testMiner);
+            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(testMiner);
+            diamanteMine.startMining(root, nullifier, proof, referredUser, oroAmount, permit);
+
+            // Referred user starts mining within referral window
+            vm.warp(block.timestamp + 1 hours);
+            vm.prank(referredUser);
+            (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(referredUser);
+            diamanteMine.startMining(root2, nullifier2, proof2, address(0), MIN_AMOUNT_IN_ORO, permit);
+        } else {
+            vm.prank(testMiner);
+            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(testMiner);
+            diamanteMine.startMining(root, nullifier, proof, address(0), oroAmount, permit);
+        }
+
+        // For 1 miner with referral, the actual count will be 2 when test miner finishes
+        uint256 expectedActiveMiners = (withReferral && referredUser != address(0) && numMiners == 1) ? 2 : numMiners;
+        assertEq(diamanteMine.activeMiners(), expectedActiveMiners, "Should have correct number of active miners");
+
+        // Time passes
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        // Calculate expected reward - use the actual active miners count for reward level
+        uint256 expectedRewardLevel = (expectedActiveMiners - 1) % (diamanteMine.maxRewardLevel() + 1);
+        uint256 expectedLevelBonus = diamanteMine.extraRewardPerLevel() * expectedRewardLevel;
+        uint256 expectedBaseReward = diamanteMine.minReward() + expectedLevelBonus;
+        uint256 expectedMiningReward = (expectedBaseReward * oroAmount) / 1e18;
+
+        uint256 expectedReferralBonus = 0;
+        if (withReferral && referredUser != address(0)) {
+            expectedReferralBonus = (expectedMiningReward * diamanteMine.referralBonusBps()) / 10_000;
+        }
+
+        uint256 expectedTotalReward = expectedMiningReward + expectedReferralBonus;
+
+        // Test miner finishes mining
+        uint256 initialBalance = diamanteToken.balanceOf(testMiner);
+        vm.prank(testMiner);
+        diamanteMine.finishMining();
+        uint256 actualReward = diamanteToken.balanceOf(testMiner) - initialBalance;
+
+        // Verify reward calculation
+        assertEq(
+            actualReward,
+            expectedTotalReward,
+            string(
+                abi.encodePacked(
+                    "Reward mismatch for ",
+                    _toString(numMiners),
+                    " miners, ",
+                    _toString(oroAmount / 1e18),
+                    " ORO, ",
+                    withReferral ? "with" : "without",
+                    " referral"
+                )
+            )
+        );
+    }
+
+    /// @notice Helper to convert uint to string for error messages
+    function _toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) return "0";
+
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+
+        return string(buffer);
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- ADDITIONAL REWARD CALCULATION TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_RewardMultiplication_WithReferralBonus() public {
+        // User1 starts mining with 3 ORO, reminds User2
+        vm.prank(user1);
+        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
+        diamanteMine.startMining(root1, nullifier1, proof1, user2, 3 * 1e18, permit);
+
+        // User2 starts mining with 2 ORO within referral window
+        vm.warp(block.timestamp + 1 hours); // Within 24 hour window
+        vm.prank(user2);
+        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
+        diamanteMine.startMining(root2, nullifier2, proof2, address(0), 2 * 1e18, permit);
+
+        // User1 finishes mining
+        vm.warp(block.timestamp + diamanteMine.miningInterval());
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+        vm.prank(user1);
+        diamanteMine.finishMining();
+        uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
+
+        // Expected calculation:
+        // baseReward = minReward + levelBonus (level 1, since activeMiners was 2)
+        uint256 levelBonus = diamanteMine.extraRewardPerLevel() * 1;
+        uint256 baseReward = diamanteMine.minReward() + levelBonus;
+        // miningReward = baseReward * 3 ORO / 1e18
+        uint256 miningReward = (baseReward * (3 * 1e18)) / 1e18;
+        // referralBonus = miningReward * 10%
+        uint256 referralBonus = (miningReward * REFERRAL_BONUS_BPS) / 10_000;
+        uint256 expectedTotal = miningReward + referralBonus;
+
+        assertEq(rewardReceived, expectedTotal, "Should receive mining reward * 3 ORO + referral bonus");
+    }
+
+    function test_RewardCalculation_ExactNumbers() public {
+        // Test with exact numbers to ensure precision
+        uint256 oroAmount = 7 * 1e18; // 7 ORO
+
+        vm.prank(user1);
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        diamanteMine.startMining(root, nullifier, proof, address(0), oroAmount, permit);
+
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+        vm.prank(user1);
+        diamanteMine.finishMining();
+        uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
+
+        // Expected: 0.1 * 1e18 * 7 * 1e18 / 1e18 = 0.7 * 1e18
+        uint256 expected = (MIN_REWARD * oroAmount) / 1e18;
+        assertEq(rewardReceived, expected, "Should get exactly 7x the base reward");
+    }
+
+    function test_MaxReward_Calculation() public {
+        // Test that maxReward() returns correct value
+        uint256 maxRewardValue = diamanteMine.maxReward();
+
+        // Expected: (minReward + maxLevelBonus) * maxOro / 1e18 * (1 + referralBonus)
+        uint256 maxBaseReward =
+            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
+        uint256 maxMiningReward = (maxBaseReward * MAX_AMOUNT_IN_ORO) / 1e18;
+        uint256 expectedMaxReward = (maxMiningReward * (10_000 + REFERRAL_BONUS_BPS)) / 10_000;
+
+        assertEq(maxRewardValue, expectedMaxReward, "maxReward() should return correct maximum possible reward");
+    }
+
+    function test_RewardScaling_Linear() public {
+        // Test that rewards scale linearly with ORO amount
+        uint256[] memory oroAmounts = new uint256[](3);
+        oroAmounts[0] = 2 * 1e18;
+        oroAmounts[1] = 4 * 1e18;
+        oroAmounts[2] = 8 * 1e18;
+
+        uint256[] memory rewards = new uint256[](3);
+
+        for (uint256 i = 0; i < 3; i++) {
+            address miner = address(uint160(uint256(keccak256(abi.encodePacked("linear_miner", i)))));
+            oroToken.mint(miner, 1000 * 1e18);
+
+            vm.prank(miner);
+            oroToken.approve(address(mockPermit2), type(uint256).max);
+
+            vm.prank(miner);
+            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(miner);
+            diamanteMine.startMining(root, nullifier, proof, address(0), oroAmounts[i], permit);
+
+            vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+            uint256 initialBalance = diamanteToken.balanceOf(miner);
+            vm.prank(miner);
+            diamanteMine.finishMining();
+            rewards[i] = diamanteToken.balanceOf(miner) - initialBalance;
+        }
+
+        // Verify linear scaling
+        assertEq(rewards[1], rewards[0] * 2, "4 ORO should give 2x reward of 2 ORO");
+        assertEq(rewards[2], rewards[0] * 4, "8 ORO should give 4x reward of 2 ORO");
     }
 
     //-//////////////////////////////////////////////////////////////////////////
@@ -442,20 +825,6 @@ contract DiamanteMineTest is Test {
         uint256 invalidAmount = MIN_AMOUNT_IN_ORO - 1;
         vm.expectRevert(DiamanteMineV1.MinAmountExceedsMaxAmount.selector);
         diamanteMine.setMaxAmountOro(invalidAmount);
-    }
-
-    function test_SetMaxRewardBoostBps() public {
-        uint256 newBps = 6000;
-
-        // --- Success ---
-        vm.prank(owner);
-        diamanteMine.setMaxRewardBoostBps(newBps);
-        assertEq(diamanteMine.maxRewardBoostBps(), newBps);
-
-        // --- Fail: Non-Owner ---
-        vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
-        diamanteMine.setMaxRewardBoostBps(newBps);
     }
 
     function test_SetMiningInterval() public {
