@@ -33,7 +33,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param nullifierHash The nullifier hash of the user's World ID proof.
     /// @param totalReward The total reward amount (mining reward + referral bonus).
     /// @param baseReward The base mining reward amount.
-    /// @param rewardBoost The boost to the reward from mining with extra ORO.
+    /// @param rewardBoost The additional reward from multiplying by ORO amount.
     /// @param referralBonusAmount The referral bonus amount.
     /// @param hasReferralBonus A boolean indicating if a referral bonus was given.
     /// @param amountMined The amount of ORO the user mined with.
@@ -94,8 +94,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     uint256 public minAmountOro;
     /// @notice The maximum amount in ORO tokens allowed to start mining.
     uint256 public maxAmountOro;
-    /// @notice The maximum reward boost a user can receive for mining with more ORO, in BPS.
-    uint256 public maxRewardBoostBps;
     /// @notice The minimum reward a user can receive for mining.
     uint256 public minReward;
     /// @notice The extra reward a user can receive for each level. The level is based on the number of active miners.
@@ -132,7 +130,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param _oro The address of the ORO token.
     /// @param _minAmountOro The minimum amount in ORO to start mining.
     /// @param _maxAmountOro The maximum amount in ORO to start mining.
-    /// @param _maxRewardBoostBps The maximum reward boost in BPS.
     /// @param _minReward The minimum reward for mining.
     /// @param _extraRewardPerLevel The extra reward per level.
     /// @param _maxRewardLevel The maximum reward level.
@@ -147,7 +144,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         IERC20 _oro,
         uint256 _minAmountOro,
         uint256 _maxAmountOro,
-        uint256 _maxRewardBoostBps,
         uint256 _minReward,
         uint256 _extraRewardPerLevel,
         uint256 _maxRewardLevel,
@@ -171,7 +167,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
         minAmountOro = _minAmountOro;
         maxAmountOro = _maxAmountOro;
-        maxRewardBoostBps = _maxRewardBoostBps;
         minReward = _minReward;
         extraRewardPerLevel = _extraRewardPerLevel;
         maxRewardLevel = _maxRewardLevel;
@@ -206,10 +201,10 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Calculates the maximum possible total reward including referral bonus.
     /// @return The maximum total reward amount.
     function maxReward() public view returns (uint256) {
-        // Boosted Max Reward = Max Base Reward * (1 + Max Boost %)
-        uint256 boosted = (maxBaseReward() * (MAX_BPS + maxRewardBoostBps)) / MAX_BPS;
-        // Total Max Reward = Boosted Max Reward * (1 + Referral Bonus %)
-        return (boosted * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+        // Max Mining Reward = Max Base Reward * Max ORO Amount
+        uint256 maxMiningReward = maxBaseReward() * maxAmountOro;
+        // Max Total Reward = Max Mining Reward * (1 + Referral Bonus %)
+        return (maxMiningReward * (MAX_BPS + referralBonusBps)) / MAX_BPS;
     }
 
     /// @notice Represents the mining state of a user.
@@ -297,7 +292,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     /// @notice Finishes the mining process and claims the reward.
     /// @dev The user must have been mining for at least `miningInterval`.
-    /// @return boostedReward The amount of DIAMANTE tokens earned from mining, including boost.
+    ///      Reward = base reward * ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
+    /// @return boostedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
@@ -317,18 +313,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 baseReward = minReward + levelBonus;
 
         uint256 amountMined = amountOroMinedWith[nullifierHash];
-        uint256 boostBps = 0;
-        if (maxAmountOro > minAmountOro) {
-            // The reward boost is a percentage of the base reward, determined by how much
-            // ORO the user mines with, scaling linearly from 0% to the max boost percentage:
-            // Boost % = (Amount Mined - Min Amount) / (Max Amount - Min Amount) * Max Boost %
-            uint256 amountDelta = amountMined - minAmountOro;
-            uint256 maxAmountDelta = maxAmountOro - minAmountOro;
-            boostBps = (amountDelta * maxRewardBoostBps) / maxAmountDelta;
-        }
-        // Reward Boost = Base Reward * Boost %
-        uint256 rewardBoost = (baseReward * boostBps) / MAX_BPS;
-        boostedReward = baseReward + rewardBoost;
+        // Directly multiply base reward by ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
+        boostedReward = baseReward * amountMined;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
@@ -361,7 +347,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
             nullifierHash,
             totalReward,
             baseReward,
-            rewardBoost,
+            boostedReward - baseReward, // rewardBoost is the additional reward from ORO multiplier
             referralBonusAmount,
             hasReferralBonus,
             amountMined
@@ -387,12 +373,6 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     function setMaxAmountOro(uint256 newAmount) external onlyOwner {
         if (newAmount < minAmountOro) revert MinAmountExceedsMaxAmount();
         maxAmountOro = newAmount;
-    }
-
-    /// @notice Sets the maximum reward boost in BPS.
-    /// @param newRewardBoostBps The new maximum reward boost in BPS.
-    function setMaxRewardBoostBps(uint256 newRewardBoostBps) external onlyOwner {
-        maxRewardBoostBps = newRewardBoostBps;
     }
 
     /// @notice Sets the mining interval.
