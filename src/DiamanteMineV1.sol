@@ -201,8 +201,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Calculates the maximum possible total reward including referral bonus.
     /// @return The maximum total reward amount.
     function maxReward() public view returns (uint256) {
-        // Max Mining Reward = Max Base Reward * Max ORO Amount
-        uint256 maxMiningReward = maxBaseReward() * maxAmountOro;
+        // Max Mining Reward = Max Base Reward * Max ORO Amount / 1e18 (treat ORO as whole tokens)
+        uint256 maxMiningReward = (maxBaseReward() * maxAmountOro) / 1e18;
         // Max Total Reward = Max Mining Reward * (1 + Referral Bonus %)
         return (maxMiningReward * (MAX_BPS + referralBonusBps)) / MAX_BPS;
     }
@@ -314,7 +314,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
         uint256 amountMined = amountOroMinedWith[nullifierHash];
         // Directly multiply base reward by ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
-        boostedReward = baseReward * amountMined;
+        // Divide by 1e18 to treat ORO as whole tokens rather than wei
+        boostedReward = (baseReward * amountMined) / 1e18;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
