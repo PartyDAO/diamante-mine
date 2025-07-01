@@ -33,7 +33,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @param nullifierHash The nullifier hash of the user's World ID proof.
     /// @param totalReward The total reward amount (mining reward + referral bonus).
     /// @param baseReward The base mining reward amount.
-    /// @param rewardBoost The additional reward from multiplying by ORO amount.
+    /// @param rewardMultiplier The additional reward from multiplying by ORO amount.
     /// @param referralBonusAmount The referral bonus amount.
     /// @param hasReferralBonus A boolean indicating if a referral bonus was given.
     /// @param amountMined The amount of ORO the user mined with.
@@ -43,7 +43,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 indexed nullifierHash,
         uint256 totalReward,
         uint256 baseReward,
-        uint256 rewardBoost,
+        uint256 rewardMultiplier,
         uint256 referralBonusAmount,
         bool hasReferralBonus,
         uint256 amountMined
@@ -293,12 +293,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Finishes the mining process and claims the reward.
     /// @dev The user must have been mining for at least `miningInterval`.
     ///      Reward = base reward * ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
-    /// @return boostedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
+    /// @return multipliedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
         external
-        returns (uint256 boostedReward, uint256 referralBonusAmount, bool hasReferralBonus)
+        returns (uint256 multipliedReward, uint256 referralBonusAmount, bool hasReferralBonus)
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
@@ -315,7 +315,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 amountMined = amountOroMinedWith[nullifierHash];
         // Directly multiply base reward by ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
         // Divide by 1e18 to treat ORO as whole tokens rather than wei
-        boostedReward = (baseReward * amountMined) / 1e18;
+        multipliedReward = (baseReward * amountMined) / 1e18;
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
@@ -326,12 +326,12 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
                 remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval
                     && remindedUser != msg.sender
             ) {
-                referralBonusAmount = (boostedReward * referralBonusBps) / MAX_BPS;
+                referralBonusAmount = (multipliedReward * referralBonusBps) / MAX_BPS;
                 hasReferralBonus = true;
             }
         }
 
-        uint256 totalReward = boostedReward + referralBonusAmount;
+        uint256 totalReward = multipliedReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
 
@@ -348,7 +348,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
             nullifierHash,
             totalReward,
             baseReward,
-            boostedReward - baseReward, // rewardBoost is the additional reward from ORO multiplier
+            multipliedReward - baseReward, // rewardMultiplier is the additional reward from ORO multiplier
             referralBonusAmount,
             hasReferralBonus,
             amountMined
