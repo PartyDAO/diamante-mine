@@ -159,7 +159,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         __Ownable_init(_initialOwner);
         __UUPSUpgradeable_init();
 
-        if (_minAmountOro > _maxAmountOro) revert MinAmountExceedsMaxAmount();
+        require(_minAmountOro <= _maxAmountOro, MinAmountExceedsMaxAmount());
 
         EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
         DIAMANTE = _diamante;
@@ -253,13 +253,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     )
         external
     {
-        if (lastMinedAt[nullifierHash] != 0) revert AlreadyMining();
-        if (amount < minAmountOro || amount > maxAmountOro) {
-            revert InvalidOroAmount(amount, minAmountOro, maxAmountOro);
-        }
-        if (DIAMANTE.balanceOf(address(this)) < maxReward() * (activeMiners + 1)) {
-            revert InsufficientBalanceForReward();
-        }
+        require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
+        require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
+        require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
 
         // Verify proof of personhood before any state changes
         WORLD_ID.verifyProof(
@@ -304,8 +300,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
-        if (startedAt == 0) revert MiningNotStarted();
-        if (block.timestamp < startedAt + miningInterval) revert MiningIntervalNotElapsed();
+        require(startedAt != 0, MiningNotStarted());
+        require(block.timestamp >= startedAt + miningInterval, MiningIntervalNotElapsed());
 
         // Calculate reward
         // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
@@ -367,14 +363,14 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Sets the minimum mining amount in ORO tokens.
     /// @param newAmount The new minimum mining amount.
     function setMinAmountOro(uint256 newAmount) external onlyOwner {
-        if (newAmount > maxAmountOro) revert MinAmountExceedsMaxAmount();
+        require(newAmount <= maxAmountOro, MinAmountExceedsMaxAmount());
         minAmountOro = newAmount;
     }
 
     /// @notice Sets the maximum mining amount in ORO tokens.
     /// @param newAmount The new maximum mining amount.
     function setMaxAmountOro(uint256 newAmount) external onlyOwner {
-        if (newAmount < minAmountOro) revert MinAmountExceedsMaxAmount();
+        require(newAmount >= minAmountOro, MinAmountExceedsMaxAmount());
         maxAmountOro = newAmount;
     }
 
