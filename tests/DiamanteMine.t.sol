@@ -2,13 +2,13 @@
 pragma solidity ^0.8.30;
 
 import { Test } from "forge-std/Test.sol";
-import { DiamanteMineV1 } from "src/DiamanteMineV1.sol";
+import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MockWorldID } from "./mocks/MockWorldID.sol";
 import { MockPermit2 } from "./mocks/MockPermit2.sol";
-import { Permit2 } from "src/utils/Permit2Helper.sol";
+import { Permit2 } from "../src/utils/Permit2Helper.sol";
 import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { MockDiamanteMineV2 } from "./mocks/MockDiamanteMineV2.sol";
@@ -32,7 +32,8 @@ contract DiamanteMineTest is Test {
     address public user2 = makeAddr("user2");
     address public owner = makeAddr("owner");
 
-    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000 * 1e18; // Much larger supply for new multiplication
+    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000 * 1e18; // Much larger supply for
+        // new multiplication
         // system
     uint256 public constant MIN_AMOUNT_IN_ORO = 1 * 1e18;
     uint256 public constant MAX_AMOUNT_IN_ORO = 100 * 1e18;
@@ -180,7 +181,8 @@ contract DiamanteMineTest is Test {
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
         // Reward is base reward multiplied by ORO amount / 1e18
-        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
+            // referral bonus
 
         uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
 
@@ -235,7 +237,8 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (activeMinersBefore - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
+            // referral bonus
 
         uint256 firstMinerNullifier = diamanteMine.addressToNullifierHash(firstMiner);
 
@@ -375,7 +378,8 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (activeMinersBefore - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
+        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
+            // referral bonus
 
         vm.prank(user1);
         diamanteMine.finishMining();
@@ -425,23 +429,39 @@ contract DiamanteMineTest is Test {
      * Where rewardLevel = (activeMiners - 1) % maxRewardLevel
      *
      * TEST CASES TABLE:
-     * ┌──────────────┬─────────────┬──────────────┬──────────────────┬─────────────────┬─────────────────┐
-     * │ ActiveMiners │ RewardLevel │ ORO Amount   │ Base Reward      │ Mining Reward   │ w/ Referral 10% │
-     * ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
-     * │ 1            │ 0           │ 1 ORO        │ 0.1              │ 0.1             │ 0.11            │
-     * │ 1            │ 0           │ 2 ORO        │ 0.1              │ 0.2             │ 0.22            │
-     * │ 1            │ 0           │ 5 ORO        │ 0.1              │ 0.5             │ 0.55            │
-     * │ 1            │ 0           │ 100 ORO      │ 0.1              │ 10.0            │ 11.0            │
-     * ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
-     * │ 2            │ 1           │ 1 ORO        │ 0.19             │ 0.19            │ 0.209           │
-     * │ 2            │ 1           │ 3 ORO        │ 0.19             │ 0.57            │ 0.627           │
-     * │ 5            │ 4           │ 2 ORO        │ 0.46             │ 0.92            │ 1.012           │
-     * │ 10           │ 9           │ 5 ORO        │ 0.91             │ 4.55            │ 5.005           │
-     * │ 11           │ 10          │ 1 ORO        │ 1.0              │ 1.0             │ 1.1             │
-     * │ 12           │ 0 (wraparound)│ 10 ORO     │ 0.1              │ 1.0             │ 1.1             │
-     * └──────────────┴─────────────┴──────────────┴──────────────────┴─────────────────┴─────────────────┘
+    *
+    ┌──────────────┬─────────────┬──────────────┬──────────────────┬─────────────────┬─────────────────┐
+    * │ ActiveMiners │ RewardLevel │ ORO Amount   │ Base Reward      │ Mining Reward   │
+    w/ Referral 10% │
+    *
+    ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
+    * │ 1            │ 0           │ 1 ORO        │ 0.1              │ 0.1             │
+    0.11            │
+    * │ 1            │ 0           │ 2 ORO        │ 0.1              │ 0.2             │
+    0.22            │
+    * │ 1            │ 0           │ 5 ORO        │ 0.1              │ 0.5             │
+    0.55            │
+    * │ 1            │ 0           │ 100 ORO      │ 0.1              │ 10.0            │
+    11.0            │
+    *
+    ├──────────────┼─────────────┼──────────────┼──────────────────┼─────────────────┼─────────────────┤
+    * │ 2            │ 1           │ 1 ORO        │ 0.19             │ 0.19            │
+    0.209           │
+    * │ 2            │ 1           │ 3 ORO        │ 0.19             │ 0.57            │
+    0.627           │
+    * │ 5            │ 4           │ 2 ORO        │ 0.46             │ 0.92            │
+    1.012           │
+    * │ 10           │ 9           │ 5 ORO        │ 0.91             │ 4.55            │
+    5.005           │
+    * │ 11           │ 10          │ 1 ORO        │ 1.0              │ 1.0             │
+    1.1             │
+    * │ 12           │ 0 (wraparound)│ 10 ORO     │ 0.1              │ 1.0             │
+    1.1             │
+    *
+    └──────────────┴─────────────┴──────────────┴──────────────────┴─────────────────┴─────────────────┘
      *
-     * Note: Base values assume minReward=0.1, extraRewardPerLevel=0.09, maxRewardLevel=10, referralBonusBps=1000
+    * Note: Base values assume minReward=0.1, extraRewardPerLevel=0.09, maxRewardLevel=10,
+    referralBonusBps=1000
      *
      * The tests below verify each row of this table plus additional edge cases.
      */
@@ -595,8 +615,10 @@ contract DiamanteMineTest is Test {
         // Calculate how many filler miners we need
         uint256 fillersNeeded;
         if (withReferral && referredUser != address(0)) {
-            // For referral tests: test miner + referred user = 2 miners, so we need numMiners - 2 fillers
-            // But if numMiners is 1, that means we want just the test miner, and they'll refer someone
+            // For referral tests: test miner + referred user = 2 miners, so we need numMiners - 2
+            // fillers
+            // But if numMiners is 1, that means we want just the test miner, and they'll refer
+            // someone
             // who starts later, making it 2 total during the test but 1 when test miner finishes
             fillersNeeded = numMiners > 1 ? numMiners - 2 : 0;
         } else {
