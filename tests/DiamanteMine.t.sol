@@ -232,7 +232,7 @@ contract DiamanteMineTest is Test {
         // 3. The first miner created finishes mining
         // Expected reward calculation
         uint256 activeMinersBefore = diamanteMine.activeMiners();
-        uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
+        uint256 rewardLevel = (activeMinersBefore - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
@@ -372,7 +372,7 @@ contract DiamanteMineTest is Test {
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
 
         uint256 activeMinersBefore = diamanteMine.activeMiners();
-        uint256 rewardLevel = (activeMinersBefore - 1) % (diamanteMine.maxRewardLevel() + 1);
+        uint256 rewardLevel = (activeMinersBefore - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
         uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No referral bonus
@@ -422,7 +422,7 @@ contract DiamanteMineTest is Test {
      * 3. referralBonus = (miningReward * referralBonusBps) / 10000 (if applicable)
      * 4. totalReward = miningReward + referralBonus
      *
-     * Where rewardLevel = (activeMiners - 1) % (maxRewardLevel + 1)
+     * Where rewardLevel = (activeMiners - 1) % maxRewardLevel
      *
      * TEST CASES TABLE:
      * ┌──────────────┬─────────────┬──────────────┬──────────────────┬─────────────────┬─────────────────┐
@@ -646,7 +646,7 @@ contract DiamanteMineTest is Test {
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
 
         // Calculate expected reward - use the actual active miners count for reward level
-        uint256 expectedRewardLevel = (expectedActiveMiners - 1) % (diamanteMine.maxRewardLevel() + 1);
+        uint256 expectedRewardLevel = (expectedActiveMiners - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedLevelBonus = diamanteMine.extraRewardPerLevel() * expectedRewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedLevelBonus;
         uint256 expectedMiningReward = (expectedBaseReward * oroAmount) / 1e18;
@@ -903,6 +903,11 @@ contract DiamanteMineTest is Test {
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
         diamanteMine.setMaxRewardLevel(newMaxLevel);
+
+        // --- Fail: Zero Value ---
+        vm.prank(owner);
+        vm.expectRevert(DiamanteMineV1.MaxRewardLevelCannotBeZero.selector);
+        diamanteMine.setMaxRewardLevel(0);
     }
 
     function test_SetReferralBonusBps() public {

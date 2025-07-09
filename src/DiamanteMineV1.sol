@@ -71,6 +71,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Thrown when setting min amount higher than max amount.
     error MinAmountExceedsMaxAmount();
 
+    /// @notice Thrown when trying to set maxRewardLevel to zero.
+    error MaxRewardLevelCannotBeZero();
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    STATE
     //////////////////////////////////////////////////////////////////////////////*/
@@ -160,6 +163,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         __UUPSUpgradeable_init();
 
         require(_minAmountOro <= _maxAmountOro, MinAmountExceedsMaxAmount());
+        require(_maxRewardLevel > 0, MaxRewardLevelCannotBeZero());
 
         EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
         DIAMANTE = _diamante;
@@ -306,7 +310,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         // Calculate reward
         // NOTE: Unlikely to happen, but activeMiners can be 0 here if this is the last miner.
         // When the last miner finishes, activeMiners will be 1, resulting in a rewardLevel of 0.
-        uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % (maxRewardLevel + 1);
+        // With this change, `maxRewardLevel` represents the total number of reward tiers.
+        // If maxRewardLevel is 10, the possible levels are 0 through 9.
+        uint256 rewardLevel = activeMiners == 0 ? 0 : (activeMiners - 1) % maxRewardLevel;
         uint256 levelBonus = extraRewardPerLevel * rewardLevel;
         uint256 baseReward = minReward + levelBonus;
 
@@ -395,6 +401,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Sets the maximum reward level.
     /// @param newMaxRewardLevel The new maximum reward level.
     function setMaxRewardLevel(uint256 newMaxRewardLevel) external onlyOwner {
+        require(newMaxRewardLevel > 0, MaxRewardLevelCannotBeZero());
         maxRewardLevel = newMaxRewardLevel;
     }
 
