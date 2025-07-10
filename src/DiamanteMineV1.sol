@@ -49,6 +49,36 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 amountMined
     );
 
+    /// @notice Emitted when the contract is initialized.
+    /// @param initialOwner The initial owner of the contract.
+    /// @param diamante The address of the DIAMANTE token.
+    /// @param oro The address of the ORO token.
+    /// @param minAmountOro The minimum amount in ORO to start mining.
+    /// @param maxAmountOro The maximum amount in ORO to start mining.
+    /// @param minReward The minimum reward for mining.
+    /// @param extraRewardPerLevel The extra reward per level.
+    /// @param maxRewardLevel The maximum reward level.
+    /// @param referralBonusBps The referral bonus in basis points.
+    /// @param miningInterval The mining interval duration in seconds.
+    /// @param worldId The address of the World ID contract.
+    /// @param appId The World ID application ID.
+    /// @param actionId The World ID action ID.
+    event Initialized(
+        address initialOwner,
+        address diamante,
+        address oro,
+        uint256 minAmountOro,
+        uint256 maxAmountOro,
+        uint256 minReward,
+        uint256 extraRewardPerLevel,
+        uint256 maxRewardLevel,
+        uint256 referralBonusBps,
+        uint256 miningInterval,
+        address worldId,
+        string appId,
+        string actionId
+    );
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    ERRORS
     //////////////////////////////////////////////////////////////////////////////*/
@@ -180,6 +210,22 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         referralBonusBps = _referralBonusBps;
         miningInterval = _miningInterval;
         WORLD_ID = _worldId;
+
+        emit Initialized(
+            _initialOwner,
+            address(_diamante),
+            address(_oro),
+            _minAmountOro,
+            _maxAmountOro,
+            _minReward,
+            _extraRewardPerLevel,
+            _maxRewardLevel,
+            _referralBonusBps,
+            _miningInterval,
+            address(_worldId),
+            _appId,
+            _actionId
+        );
     }
 
     /*//////////////////////////////////////////////////////////////////////////////

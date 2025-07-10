@@ -79,6 +79,25 @@ contract DiamanteMineTest is Test {
             "action_test"
         );
 
+        // Expect the Initialized event to be emitted with the correct data upon deployment.
+        // Since no event fields are indexed, we only check the data payload.
+        vm.expectEmit(false, false, false, true);
+        emit DiamanteMineV1.Initialized(
+            owner,
+            address(diamanteToken),
+            address(oroToken),
+            MIN_AMOUNT_IN_ORO,
+            MAX_AMOUNT_IN_ORO,
+            MIN_REWARD,
+            EXTRA_REWARD_PER_LEVEL,
+            MAX_REWARD_LEVEL,
+            REFERRAL_BONUS_BPS,
+            MINING_INTERVAL,
+            address(mockWorldID),
+            "app_test",
+            "action_test"
+        );
+
         // Deploy proxy
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), data);
         diamanteMine = DiamanteMineV1(address(proxy));
