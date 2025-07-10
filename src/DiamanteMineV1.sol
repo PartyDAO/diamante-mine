@@ -74,6 +74,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice Thrown when trying to set maxRewardLevel to zero.
     error MaxRewardLevelCannotBeZero();
 
+    /// @notice Thrown when a user tries to remind themself.
+    error CannotRemindSelf();
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    STATE
     //////////////////////////////////////////////////////////////////////////////*/
@@ -235,13 +238,46 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         return MiningState.Mining;
     }
 
+    /// @notice Checks if a user is eligible to claim a referral bonus.
+    /// @dev This is a helper function for the front-end to determine bonus
+    ///      eligibility before calling finishMining.
+    /// @param user The address of the user to check.
+    /// @return canClaim Whether the user can claim a referral bonus.
+    function isEligibleForReferralBonus(address user) public view returns (bool canClaim) {
+        uint256 nullifierHash = addressToNullifierHash[user];
+        uint256 startedAt = lastMinedAt[nullifierHash];
+
+        // To claim a bonus, the user must be currently mining.
+        if (startedAt == 0) {
+            return false;
+        }
+
+        address remindedUser = lastRemindedAddress[nullifierHash];
+
+        // A user must have been reminded to be eligible for the bonus.
+        if (remindedUser == address(0)) {
+            return false;
+        }
+
+        // Users cannot refer themselves.
+        if (remindedUser == user) {
+            return false;
+        }
+
+        uint256 remindedNullifierHash = addressToNullifierHash[remindedUser];
+        uint256 remindedUserStartTime = lastMinedAt[remindedNullifierHash];
+
+        // The reminded user must have started mining after the referrer and within the mining interval.
+        return remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval;
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                     CORE
     //////////////////////////////////////////////////////////////////////////////*/
 
     /// @notice Starts the mining process for the caller.
     /// @dev Requires a valid World ID proof. The user must pay a fee in ORO tokens.
-    /// @param args ABI-encoded `(address userToRemind, uint256 amount)`.
+    /// @param args Encoded mining arguments containing referrer address and ORO amount.
     /// @param root The root of the Merkle tree of World ID identities.
     /// @param nullifierHash A unique identifier for the user's proof.
     /// @param proof The zero-knowledge proof of personhood.
@@ -257,6 +293,8 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     {
         // Decode mining arguments
         (address userToRemind, uint256 amount) = _decodeMiningArgs(args);
+
+        require(userToRemind != msg.sender, CannotRemindSelf());
 
         require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
         require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
@@ -323,16 +361,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
         // Check for and apply referral bonus
         address remindedUser = lastRemindedAddress[nullifierHash];
-        if (remindedUser != address(0)) {
-            uint256 remindedNullifierHash = addressToNullifierHash[remindedUser];
-            uint256 remindedUserStartTime = lastMinedAt[remindedNullifierHash];
-            if (
-                remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval
-                    && remindedUser != msg.sender
-            ) {
-                referralBonusAmount = (multipliedReward * referralBonusBps) / MAX_BPS;
-                hasReferralBonus = true;
-            }
+        if (isEligibleForReferralBonus(msg.sender)) {
+            referralBonusAmount = (multipliedReward * referralBonusBps) / MAX_BPS;
+            hasReferralBonus = true;
         }
 
         uint256 totalReward = multipliedReward + referralBonusAmount;
