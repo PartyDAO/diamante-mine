@@ -5,7 +5,6 @@ import { console } from "forge-std/console.sol";
 import { Script } from "forge-std/Script.sol";
 import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
-import { ERC20Mock } from "../tests/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -33,7 +32,7 @@ contract DeployUpgradeableProd is Script {
         uint256 extraRewardPerLevel = 0.08333 ether; // (0.8 - 0.05) / 9 = 0.08333...
         uint256 maxRewardLevel = 10;
         uint256 referralBonusBps = 10_000; // 100% bonus
-        uint256 miningInterval = 5 minutes;
+        uint256 miningInterval = 24 hours;
         string memory actionId = "mine";
 
         // Prepare initialization data
