@@ -31,6 +31,7 @@ contract DiamanteMineTest is Test {
     address public user1 = makeAddr("user1");
     address public user2 = makeAddr("user2");
     address public owner = makeAddr("owner");
+    address public user3 = makeAddr("user3");
 
     uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000 * 1e18; // Much larger supply for
         // new multiplication
@@ -89,11 +90,14 @@ contract DiamanteMineTest is Test {
         // Fund users with ORO tokens
         oroToken.mint(user1, 1000 * 1e18);
         oroToken.mint(user2, 1000 * 1e18);
+        oroToken.mint(user3, 1000 * 1e18);
 
         // Users approve ORO spending by the Permit2 contract
         vm.prank(user1);
         oroToken.approve(address(mockPermit2), type(uint256).max);
         vm.prank(user2);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        vm.prank(user3);
         oroToken.approve(address(mockPermit2), type(uint256).max);
     }
 
@@ -107,33 +111,33 @@ contract DiamanteMineTest is Test {
         proof = [uint256(1), 2, 3, 4, 5, 6, 7, 8];
     }
 
-    /// @notice Helper function to encode referral data from a single address.
-    /// @param referralAddress The address to encode, or address(0) for no referral.
-    /// @return Encoded referral data as bytes.
-    function _encodeReferralData(address referralAddress) internal pure returns (bytes memory) {
-        if (referralAddress == address(0)) {
-            return abi.encode(new address[](0)); // Empty array
-        }
+    /// @notice Helper function to start mining as a specific user
+    function _startMiningAs(address user, address referrer, uint256 amount) internal {
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user);
+        bytes memory args = diamanteMine.encodeMiningArgs(referrer, amount);
 
-        address[] memory referralAddresses = new address[](1);
-        referralAddresses[0] = referralAddress;
-        return abi.encode(referralAddresses);
+        vm.startPrank(user);
+        diamanteMine.startMining(args, root, nullifier, proof, permit);
+        vm.stopPrank();
     }
 
-    /// @notice Helper function to encode referral data from multiple addresses.
-    /// @param referralAddresses Array of addresses to encode.
-    /// @return Encoded referral data as bytes.
-    function _encodeReferralData(address[] memory referralAddresses) internal pure returns (bytes memory) {
-        return abi.encode(referralAddresses);
+    /// @notice Helper function to finish mining as a specific user
+    function _finishMiningAs(address user) internal {
+        vm.startPrank(user);
+        diamanteMine.finishMining();
+        vm.stopPrank();
     }
 
     function test_StartMining_Success() public {
-        vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
+        bytes memory args = diamanteMine.encodeMiningArgs(user2, MIN_AMOUNT_IN_ORO);
+
+        vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(user2), MIN_AMOUNT_IN_ORO, permit);
+        diamanteMine.startMining(args, root, nullifier, proof, permit);
+        vm.stopPrank();
 
         assertEq(oroToken.balanceOf(user1), (1000 * 1e18) - MIN_AMOUNT_IN_ORO, "User1 ORO balance should decrease");
         assertEq(oroToken.balanceOf(address(diamanteMine)), MIN_AMOUNT_IN_ORO, "Contract ORO balance should increase");
@@ -147,27 +151,27 @@ contract DiamanteMineTest is Test {
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
         uint256 tooLow = MIN_AMOUNT_IN_ORO - 1;
+        bytes memory argsLow = diamanteMine.encodeMiningArgs(address(0), tooLow);
         vm.expectRevert(
             abi.encodeWithSelector(
                 DiamanteMineV1.InvalidOroAmount.selector, tooLow, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
             )
         );
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), tooLow, permit);
+        diamanteMine.startMining(argsLow, root, nullifier, proof, permit);
 
         uint256 tooHigh = MAX_AMOUNT_IN_ORO + 1;
+        bytes memory argsHigh = diamanteMine.encodeMiningArgs(address(0), tooHigh);
         vm.expectRevert(
             abi.encodeWithSelector(
                 DiamanteMineV1.InvalidOroAmount.selector, tooHigh, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
             )
         );
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), tooHigh, permit);
+        diamanteMine.startMining(argsHigh, root, nullifier, proof, permit);
     }
 
     function test_FinishMining_Success_NoBonus() public {
         // 1. User1 starts mining, activeMiners will be 1
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
         assertEq(diamanteMine.activeMiners(), 1);
 
         // 2. Time passes
@@ -186,8 +190,7 @@ contract DiamanteMineTest is Test {
 
         uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
 
-        // Prank must be immediately before the state-changing call
-        vm.prank(user1);
+        vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.FinishedMining(
             user1,
@@ -201,6 +204,7 @@ contract DiamanteMineTest is Test {
             MIN_AMOUNT_IN_ORO
         );
         diamanteMine.finishMining();
+        vm.stopPrank();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
 
         uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
@@ -219,7 +223,8 @@ contract DiamanteMineTest is Test {
 
             vm.startPrank(user);
             oroToken.approve(address(mockPermit2), type(uint256).max);
-            diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+            bytes memory args = diamanteMine.encodeMiningArgs(address(0), MIN_AMOUNT_IN_ORO);
+            diamanteMine.startMining(args, root, nullifier, proof, permit);
             vm.stopPrank();
 
             if (i == 0) {
@@ -261,21 +266,21 @@ contract DiamanteMineTest is Test {
 
     function test_Fail_StartMining_AlreadyMining() public {
         // 1. User1 starts mining
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
 
         // 2. User1 tries to start mining again before finishing the first session
-        vm.prank(user1);
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        bytes memory args = diamanteMine.encodeMiningArgs(address(0), MIN_AMOUNT_IN_ORO);
+
+        vm.startPrank(user1);
         vm.expectRevert(DiamanteMineV1.AlreadyMining.selector);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        diamanteMine.startMining(args, root, nullifier, proof, permit);
+        vm.stopPrank();
     }
 
     function test_Fail_StartMining_InsufficientDiamante() public {
         // 1. User1 starts mining successfully.
-        vm.prank(user1);
-        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
         assertEq(diamanteMine.activeMiners(), 1);
 
         // 2. Withdraw just enough so the contract can't support another miner.
@@ -291,10 +296,13 @@ contract DiamanteMineTest is Test {
         assertEq(diamanteToken.balanceOf(address(diamanteMine)), maxRew);
 
         // 3. User2 tries to start mining and fails.
-        vm.prank(user2);
         (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
+        bytes memory args2 = diamanteMine.encodeMiningArgs(address(0), MIN_AMOUNT_IN_ORO);
+
+        vm.startPrank(user2);
         vm.expectRevert(DiamanteMineV1.InsufficientBalanceForReward.selector);
-        diamanteMine.startMining(root2, nullifier2, proof2, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        diamanteMine.startMining(args2, root2, nullifier2, proof2, permit);
+        vm.stopPrank();
     }
 
     function test_Fail_FinishMining_NotStarted() public {
@@ -305,24 +313,21 @@ contract DiamanteMineTest is Test {
 
     function test_Fail_FinishMining_TooSoon() public {
         // 1. User1 starts mining
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
 
         // 2. Time passes, but not enough
         vm.warp(block.timestamp + 1 hours);
 
         // 3. User1 tries to finish mining
-        vm.prank(user1);
+        vm.startPrank(user1);
         vm.expectRevert(DiamanteMineV1.MiningIntervalNotElapsed.selector);
         diamanteMine.finishMining();
+        vm.stopPrank();
     }
 
     function _assertExpectedRewardsFromMultiplier(uint256 amountToMine, string memory assertionMsg) internal {
         // 1. User1 starts mining
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), amountToMine, permit);
+        _startMiningAs(user1, address(0), amountToMine);
 
         // 2. Time passes
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
@@ -334,8 +339,7 @@ contract DiamanteMineTest is Test {
         uint256 baseReward = diamanteMine.minReward(); // No level bonus when only 1 miner
         uint256 expectedTotalReward = (baseReward * amountToMine) / 1e18;
 
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
 
         uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
@@ -360,16 +364,12 @@ contract DiamanteMineTest is Test {
 
     function test_FinishMining_NoBonus_ReferralMinedTooLate() public {
         // 1. User1 starts mining, reminds User2
-        vm.prank(user1);
-        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, _encodeReferralData(user2), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, user2, MIN_AMOUNT_IN_ORO);
 
         uint256 startTime = block.timestamp;
         // 2. User2 mines, but AFTER the referral window for user1 has passed
         vm.warp(startTime + diamanteMine.miningInterval() + 1);
-        vm.prank(user2);
-        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        diamanteMine.startMining(root2, nullifier2, proof2, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user2, address(0), MIN_AMOUNT_IN_ORO);
 
         // 3. User1 finishes mining
         uint256 initialDiamanteBalance = diamanteToken.balanceOf(user1);
@@ -381,8 +381,7 @@ contract DiamanteMineTest is Test {
         uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
             // referral bonus
 
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
         uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
         assertEq(rewardReceived, expectedTotalReward, "User1 should not receive a referral bonus");
@@ -392,26 +391,20 @@ contract DiamanteMineTest is Test {
         assertEq(diamanteMine.activeMiners(), 0, "Initially, no active miners");
 
         // User1 starts mining
-        vm.prank(user1);
-        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
         assertEq(diamanteMine.activeMiners(), 1, "Active miners should be 1");
 
         // User2 starts mining
-        vm.prank(user2);
-        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        diamanteMine.startMining(root2, nullifier2, proof2, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user2, address(0), MIN_AMOUNT_IN_ORO);
         assertEq(diamanteMine.activeMiners(), 2, "Active miners should be 2");
 
         // User1 finishes mining
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
         assertEq(diamanteMine.activeMiners(), 1, "Active miners should be 1 after one finishes");
 
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
-        vm.prank(user2);
-        diamanteMine.finishMining();
+        _finishMiningAs(user2);
         assertEq(diamanteMine.activeMiners(), 0, "Active miners should be 0 after both finish");
     }
 
@@ -484,17 +477,9 @@ contract DiamanteMineTest is Test {
         oroToken.approve(address(mockPermit2), type(uint256).max);
 
         // Start mining with different amounts
-        vm.prank(miner1);
-        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(miner1);
-        diamanteMine.startMining(root1, nullifier1, proof1, _encodeReferralData(address(0)), 1 * 1e18, permit);
-
-        vm.prank(miner2);
-        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(miner2);
-        diamanteMine.startMining(root2, nullifier2, proof2, _encodeReferralData(address(0)), 5 * 1e18, permit);
-
-        vm.prank(miner3);
-        (uint256 root3, uint256 nullifier3, uint256[8] memory proof3) = _getProof(miner3);
-        diamanteMine.startMining(root3, nullifier3, proof3, _encodeReferralData(address(0)), 10 * 1e18, permit);
+        _startMiningAs(miner1, address(0), 1 * 1e18);
+        _startMiningAs(miner2, address(0), 5 * 1e18);
+        _startMiningAs(miner3, address(0), 10 * 1e18);
 
         assertEq(diamanteMine.activeMiners(), 3);
 
@@ -503,8 +488,7 @@ contract DiamanteMineTest is Test {
 
         // Check miner1 reward (1 ORO)
         uint256 initialBalance1 = diamanteToken.balanceOf(miner1);
-        vm.prank(miner1);
-        diamanteMine.finishMining();
+        _finishMiningAs(miner1);
         uint256 reward1 = diamanteToken.balanceOf(miner1) - initialBalance1;
 
         // Expected: (minReward + level2Bonus) * 1 ORO / 1e18
@@ -514,8 +498,7 @@ contract DiamanteMineTest is Test {
 
         // Check miner2 reward (5 ORO)
         uint256 initialBalance2 = diamanteToken.balanceOf(miner2);
-        vm.prank(miner2);
-        diamanteMine.finishMining();
+        _finishMiningAs(miner2);
         uint256 reward2 = diamanteToken.balanceOf(miner2) - initialBalance2;
 
         // Expected: (minReward + level1Bonus) * 5 ORO / 1e18
@@ -525,8 +508,7 @@ contract DiamanteMineTest is Test {
 
         // Check miner3 reward (10 ORO)
         uint256 initialBalance3 = diamanteToken.balanceOf(miner3);
-        vm.prank(miner3);
-        diamanteMine.finishMining();
+        _finishMiningAs(miner3);
         uint256 reward3 = diamanteToken.balanceOf(miner3) - initialBalance3;
 
         // Expected: (minReward + level0Bonus) * 10 ORO / 1e18
@@ -633,9 +615,7 @@ contract DiamanteMineTest is Test {
             vm.prank(filler);
             oroToken.approve(address(mockPermit2), type(uint256).max);
 
-            vm.prank(filler);
-            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(filler);
-            diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+            _startMiningAs(filler, address(0), MIN_AMOUNT_IN_ORO);
         }
 
         // Set up the test miner (user1)
@@ -643,21 +623,13 @@ contract DiamanteMineTest is Test {
 
         // If testing referral, make sure referred user starts mining within window
         if (withReferral && referredUser != address(0)) {
-            vm.prank(testMiner);
-            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(testMiner);
-            diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(referredUser), oroAmount, permit);
+            _startMiningAs(testMiner, referredUser, oroAmount);
 
             // Referred user starts mining within referral window
             vm.warp(block.timestamp + 1 hours);
-            vm.prank(referredUser);
-            (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(referredUser);
-            diamanteMine.startMining(
-                root2, nullifier2, proof2, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit
-            );
+            _startMiningAs(referredUser, address(0), MIN_AMOUNT_IN_ORO);
         } else {
-            vm.prank(testMiner);
-            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(testMiner);
-            diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), oroAmount, permit);
+            _startMiningAs(testMiner, address(0), oroAmount);
         }
 
         // For 1 miner with referral, the actual count will be 2 when test miner finishes
@@ -682,8 +654,7 @@ contract DiamanteMineTest is Test {
 
         // Test miner finishes mining
         uint256 initialBalance = diamanteToken.balanceOf(testMiner);
-        vm.prank(testMiner);
-        diamanteMine.finishMining();
+        _finishMiningAs(testMiner);
         uint256 actualReward = diamanteToken.balanceOf(testMiner) - initialBalance;
 
         // Verify reward calculation
@@ -731,21 +702,16 @@ contract DiamanteMineTest is Test {
 
     function test_RewardMultiplication_WithReferralBonus() public {
         // User1 starts mining with 3 ORO, reminds User2
-        vm.prank(user1);
-        (uint256 root1, uint256 nullifier1, uint256[8] memory proof1) = _getProof(user1);
-        diamanteMine.startMining(root1, nullifier1, proof1, _encodeReferralData(user2), 3 * 1e18, permit);
+        _startMiningAs(user1, user2, 3 * 1e18);
 
         // User2 starts mining with 2 ORO within referral window
         vm.warp(block.timestamp + 1 hours); // Within 24 hour window
-        vm.prank(user2);
-        (uint256 root2, uint256 nullifier2, uint256[8] memory proof2) = _getProof(user2);
-        diamanteMine.startMining(root2, nullifier2, proof2, _encodeReferralData(address(0)), 2 * 1e18, permit);
+        _startMiningAs(user2, address(0), 2 * 1e18);
 
         // User1 finishes mining
         vm.warp(block.timestamp + diamanteMine.miningInterval());
         uint256 initialBalance = diamanteToken.balanceOf(user1);
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
         uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
 
         // Expected calculation:
@@ -765,15 +731,12 @@ contract DiamanteMineTest is Test {
         // Test with exact numbers to ensure precision
         uint256 oroAmount = 7 * 1e18; // 7 ORO
 
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), oroAmount, permit);
+        _startMiningAs(user1, address(0), oroAmount);
 
         vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
 
         uint256 initialBalance = diamanteToken.balanceOf(user1);
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
         uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
 
         // Expected: 0.1 * 1e18 * 7 * 1e18 / 1e18 = 0.7 * 1e18
@@ -810,15 +773,12 @@ contract DiamanteMineTest is Test {
             vm.prank(miner);
             oroToken.approve(address(mockPermit2), type(uint256).max);
 
-            vm.prank(miner);
-            (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(miner);
-            diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), oroAmounts[i], permit);
+            _startMiningAs(miner, address(0), oroAmounts[i]);
 
             vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
 
             uint256 initialBalance = diamanteToken.balanceOf(miner);
-            vm.prank(miner);
-            diamanteMine.finishMining();
+            _finishMiningAs(miner);
             rewards[i] = diamanteToken.balanceOf(miner) - initialBalance;
         }
 
@@ -1020,9 +980,7 @@ contract DiamanteMineTest is Test {
         assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.NotMining));
 
         // 2. User1 starts mining
-        vm.prank(user1);
-        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
-        diamanteMine.startMining(root, nullifier, proof, _encodeReferralData(address(0)), MIN_AMOUNT_IN_ORO, permit);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
 
         // 3. Now, user1 is mining
         assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.Mining));
@@ -1032,115 +990,181 @@ contract DiamanteMineTest is Test {
         assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.ReadyToFinish));
 
         // 5. User1 finishes mining
-        vm.prank(user1);
-        diamanteMine.finishMining();
+        _finishMiningAs(user1);
 
         // 6. Finally, user1 is not mining again
         assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.NotMining));
     }
 
     //-//////////////////////////////////////////////////////////////////////////
+    //- REFERRAL LOGIC TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_CanClaimReferralBonus_Success() public {
+        // 1. User1 starts mining, reminds User2
+        _startMiningAs(user1, user2, MIN_AMOUNT_IN_ORO);
+        // 2. User2 starts mining within the referral window
+        vm.warp(block.timestamp + 1 hours);
+        _startMiningAs(user2, address(0), MIN_AMOUNT_IN_ORO);
+        // 3. User1 should now be eligible for a bonus
+        assertTrue(diamanteMine.isEligibleForReferralBonus(user1), "User1 should be able to claim bonus");
+    }
+
+    function test_CanClaimReferralBonus_Fail_NotMining() public view {
+        // User1 has not started mining, so cannot claim a bonus
+        assertFalse(diamanteMine.isEligibleForReferralBonus(user1), "Should not claim bonus if not mining");
+    }
+
+    function test_CanClaimReferralBonus_Fail_NoReminder() public {
+        // User1 starts mining but doesn't remind anyone
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
+        assertFalse(diamanteMine.isEligibleForReferralBonus(user1), "Should not claim bonus if no one was reminded");
+    }
+
+    function test_CanClaimReferralBonus_Fail_RemindedMinedTooLate() public {
+        // 1. User1 starts mining, reminds User2
+        _startMiningAs(user1, user2, MIN_AMOUNT_IN_ORO);
+        // 2. User2 mines, but AFTER the referral window for user1 has passed
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _startMiningAs(user2, address(0), MIN_AMOUNT_IN_ORO);
+        // 3. User1 is no longer eligible for the bonus
+        assertFalse(
+            diamanteMine.isEligibleForReferralBonus(user1), "Should not claim bonus if reminded user mined too late"
+        );
+    }
+
+    function test_CanClaimReferralBonus_Fail_RemindedMinedTooEarly() public {
+        // 1. User2 starts mining first
+        _startMiningAs(user2, address(0), MIN_AMOUNT_IN_ORO);
+        // 2. User1 starts mining later, reminding User2
+        vm.warp(block.timestamp + 1 hours);
+        _startMiningAs(user1, user2, MIN_AMOUNT_IN_ORO);
+        // 3. User1 is not eligible for a bonus because the reminded user started before them
+        assertFalse(
+            diamanteMine.isEligibleForReferralBonus(user1), "Should not claim bonus if reminded user mined first"
+        );
+    }
+
+    function test_CanClaimReferralBonus_Fail_RemindedNotMining() public {
+        // User1 starts mining, reminds User2, but User2 never starts
+        _startMiningAs(user1, user2, MIN_AMOUNT_IN_ORO);
+        assertFalse(
+            diamanteMine.isEligibleForReferralBonus(user1), "Should not claim bonus if reminded user has not mined"
+        );
+    }
+
+    function test_Fail_StartMining_CannotRemindSelf() public {
+        (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
+        // User1 tries to remind themself
+        bytes memory args = diamanteMine.encodeMiningArgs(user1, MIN_AMOUNT_IN_ORO);
+
+        vm.startPrank(user1);
+        vm.expectRevert(DiamanteMineV1.CannotRemindSelf.selector);
+        diamanteMine.startMining(args, root, nullifier, proof, permit);
+        vm.stopPrank();
+    }
+
+    function test_FinishMining_WithReferral_AfterRefactor() public {
+        // This test verifies that the referral bonus is still paid out correctly
+        // after refactoring finishMining to use the isEligibleForReferralBonus helper.
+
+        // 1. User1 starts mining with 3 ORO, reminds User2
+        _startMiningAs(user1, user2, 3 * 1e18);
+
+        // 2. User2 starts mining with 2 ORO within referral window
+        vm.warp(block.timestamp + 1 hours); // Within 24 hour window
+        _startMiningAs(user2, address(0), 2 * 1e18);
+
+        // Pre-condition check
+        assertTrue(diamanteMine.isEligibleForReferralBonus(user1));
+
+        // 3. User1 finishes mining
+        vm.warp(block.timestamp + diamanteMine.miningInterval());
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+
+        // Expected calculation:
+        // activeMiners = 2, so rewardLevel = 1
+        uint256 levelBonus = diamanteMine.extraRewardPerLevel() * 1;
+        uint256 baseReward = diamanteMine.minReward() + levelBonus;
+        // miningReward = baseReward * 3 ORO / 1e18
+        uint256 miningReward = (baseReward * (3 * 1e18)) / 1e18;
+        // referralBonus = miningReward * 10%
+        uint256 referralBonus = (miningReward * REFERRAL_BONUS_BPS) / 10_000;
+        uint256 expectedTotal = miningReward + referralBonus;
+
+        vm.startPrank(user1);
+        (,, bool hasReferralBonus) = diamanteMine.finishMining();
+        vm.stopPrank();
+
+        uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
+
+        assertTrue(hasReferralBonus, "Should have received a referral bonus");
+        assertEq(rewardReceived, expectedTotal, "Should receive mining reward * 3 ORO + referral bonus");
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
     //- REFERRAL DATA ENCODING/DECODING TESTS
     //-//////////////////////////////////////////////////////////////////////////
 
-    function test_ReferralDataEncoding_SingleAddress() public view {
-        bytes memory encoded = _encodeReferralData(user2);
+    function test_ArgsEncoding() public view {
+        bytes memory encoded = diamanteMine.encodeMiningArgs(user2, 123 ether);
 
-        // Test the encoding format - should decode to the same address
-        address[] memory decoded = abi.decode(encoded, (address[]));
-        assertEq(decoded.length, 1, "Should have one address");
-        assertEq(decoded[0], user2, "Should decode to the same address");
+        // Test the encoding format - should decode to the same address and amount
+        (address decodedUser, uint256 decodedAmount) = abi.decode(encoded, (address, uint256));
+        assertEq(decodedUser, user2, "Should decode to the same address");
+        assertEq(decodedAmount, 123 ether, "Should decode to the same amount");
     }
 
-    function test_ReferralDataEncoding_ZeroAddress() public pure {
-        bytes memory encoded = _encodeReferralData(address(0));
-
-        // Test the encoding format - zero address should result in empty array
-        address[] memory decoded = abi.decode(encoded, (address[]));
-        assertEq(decoded.length, 0, "Should have no addresses for zero address input");
-    }
-
-    function test_ReferralDataEncoding_ExplicitZeroAddress() public pure {
-        // Test encoding an array that explicitly contains address(0)
-        address[] memory addresses = new address[](1);
-        addresses[0] = address(0);
-        bytes memory encoded = _encodeReferralData(addresses);
-
-        // Should preserve the explicit zero address
-        address[] memory decoded = abi.decode(encoded, (address[]));
-        assertEq(decoded.length, 1, "Should have one address");
-        assertEq(decoded[0], address(0), "Should decode to explicit zero address");
-    }
-
-    function test_ReferralDataEncoding_MultipleAddresses() public view {
-        address[] memory addresses = new address[](3);
-        addresses[0] = user1;
-        addresses[1] = user2;
-        addresses[2] = owner;
-
-        bytes memory encoded = _encodeReferralData(addresses);
+    function test_ArgsEncoding_ZeroAddressAndAmount() public view {
+        bytes memory encoded = diamanteMine.encodeMiningArgs(address(0), 0);
 
         // Test the encoding format
-        address[] memory decoded = abi.decode(encoded, (address[]));
-        assertEq(decoded.length, 3, "Should have three addresses");
-        assertEq(decoded[0], user1, "Should decode to the first address");
-        assertEq(decoded[1], user2, "Should decode to the second address");
-        assertEq(decoded[2], owner, "Should decode to the third address");
+        (address decodedUser, uint256 decodedAmount) = abi.decode(encoded, (address, uint256));
+        assertEq(decodedUser, address(0), "Should decode to zero address");
+        assertEq(decodedAmount, 0, "Should decode to zero amount");
     }
 
-    function test_ReferralDataEncoding_EmptyArray() public pure {
-        address[] memory addresses = new address[](0);
-        bytes memory encoded = _encodeReferralData(addresses);
-
-        // Test the encoding format
-        address[] memory decoded = abi.decode(encoded, (address[]));
-        assertEq(decoded.length, 0, "Should have no addresses");
-    }
-
-    function test_StartMining_WithEncodedReferralData() public {
+    function test_StartMining_WithEncodedArgs() public {
         // Test that startMining works with encoded referral data
-        vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
         // Encode multiple referral addresses - should use first one
-        address[] memory referralAddresses = new address[](2);
-        referralAddresses[0] = user2;
-        referralAddresses[1] = owner;
-        bytes memory encodedData = _encodeReferralData(referralAddresses);
+        bytes memory args = diamanteMine.encodeMiningArgs(user2, MIN_AMOUNT_IN_ORO);
 
+        vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
         emit DiamanteMineV1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
-        diamanteMine.startMining(root, nullifier, proof, encodedData, MIN_AMOUNT_IN_ORO, permit);
+        diamanteMine.startMining(args, root, nullifier, proof, permit);
+        vm.stopPrank();
 
         // Verify that user2 (first address) was stored as the reminded user
-        assertEq(diamanteMine.lastRemindedAddress(nullifier), user2, "Should store the first referral address");
+        assertEq(diamanteMine.lastRemindedAddress(nullifier), user2, "Should store the referral address");
     }
 
-    function test_StartMining_WithEmptyReferralData() public {
+    function test_StartMining_WithEmptyArgs() public {
         // Test that startMining works with empty referral data
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
         bytes memory emptyData = "";
 
-        vm.expectEmit(true, true, true, true);
-        emit DiamanteMineV1.StartedMining(user1, address(0), nullifier, MIN_AMOUNT_IN_ORO);
-        diamanteMine.startMining(root, nullifier, proof, emptyData, MIN_AMOUNT_IN_ORO, permit);
-
-        // Verify that no referral address was stored
-        assertEq(diamanteMine.lastRemindedAddress(nullifier), address(0), "Should not store any referral address");
+        // Amount will be decoded as 0, which is less than minAmountOro
+        vm.expectRevert(
+            abi.encodeWithSelector(DiamanteMineV1.InvalidOroAmount.selector, 0, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO)
+        );
+        diamanteMine.startMining(emptyData, root, nullifier, proof, permit);
     }
 
-    function test_StartMining_WithInvalidReferralData() public {
+    function test_StartMining_WithInvalidArgs() public {
         // Test that startMining reverts on invalid referral data (expected behavior)
         vm.prank(user1);
         (uint256 root, uint256 nullifier, uint256[8] memory proof) = _getProof(user1);
 
-        // Invalid data that can't be decoded as address[]
+        // Invalid data that can't be decoded as (address, uint256)
         bytes memory invalidData = "invalid_data";
 
         // Should revert when trying to decode invalid data
         vm.expectRevert();
-        diamanteMine.startMining(root, nullifier, proof, invalidData, MIN_AMOUNT_IN_ORO, permit);
+        diamanteMine.startMining(invalidData, root, nullifier, proof, permit);
     }
 }
