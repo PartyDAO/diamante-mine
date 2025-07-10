@@ -17,6 +17,8 @@ struct Config {
 contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
 
+    // Last Updated: 2025-07-10
+    // From https://github.com/PartyDAO/partyworld/blob/staging/apps/diamante/src/config.ts#L25
     Config[] public configs = [
         Config({
             label: "production",
