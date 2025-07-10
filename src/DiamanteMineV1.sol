@@ -241,22 +241,23 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
     /// @notice Starts the mining process for the caller.
     /// @dev Requires a valid World ID proof. The user must pay a fee in ORO tokens.
+    /// @param args ABI-encoded `(address userToRemind, uint256 amount)`.
     /// @param root The root of the Merkle tree of World ID identities.
     /// @param nullifierHash A unique identifier for the user's proof.
     /// @param proof The zero-knowledge proof of personhood.
-    /// @param referralData Encoded data containing addresses of users to remind (ABI-encoded address array).
-    /// @param amount The amount of ORO to use for mining.
     /// @param permit A Permit2 struct for approving the ORO token transfer.
     function startMining(
+        bytes calldata args,
         uint256 root,
         uint256 nullifierHash,
         uint256[8] calldata proof,
-        bytes calldata referralData,
-        uint256 amount,
         Permit2 memory permit
     )
         external
     {
+        // Decode mining arguments
+        (address userToRemind, uint256 amount) = _decodeMiningArgs(args);
+
         require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
         require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
         require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
@@ -272,8 +273,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         amountOroMinedWith[nullifierHash] = amount;
         addressToNullifierHash[msg.sender] = nullifierHash;
 
-        // Decode referral data to extract friend addresses
-        address userToRemind = _decodeReferralData(referralData);
+        // Store referral information
         if (userToRemind != address(0)) {
             lastRemindedAddress[nullifierHash] = userToRemind;
         }
@@ -425,18 +425,27 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         token.safeTransfer(owner(), amount);
     }
 
-    /// Decodes referral data to extract addresses.
-    function _decodeReferralData(bytes calldata referralData) internal pure returns (address) {
-        if (referralData.length == 0) {
-            return address(0);
+    /*//////////////////////////////////////////////////////////////////////////////
+    //                                   HELPERS
+    //////////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice Encodes mining arguments for use with startMining function.
+    /// @param referrer The address of the user to refer (can be address(0) for no referral).
+    /// @param amount The amount of ORO to use for mining.
+    /// @return Encoded mining arguments as bytes.
+    function encodeMiningArgs(address referrer, uint256 amount) external pure returns (bytes memory) {
+        return abi.encode(referrer, amount);
+    }
+
+    /// @notice Decodes mining arguments from bytes.
+    /// @param args The encoded mining arguments.
+    /// @return referrer The referrer address.
+    /// @return amount The ORO amount.
+    function _decodeMiningArgs(bytes calldata args) internal pure returns (address referrer, uint256 amount) {
+        if (args.length == 0) {
+            return (address(0), 0);
         }
 
-        address[] memory referralAddresses = abi.decode(referralData, (address[]));
-
-        if (referralAddresses.length == 0) {
-            return address(0);
-        }
-
-        return referralAddresses[0];
+        return abi.decode(args, (address, uint256));
     }
 }
