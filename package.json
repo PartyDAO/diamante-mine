@@ -1,18 +1,8 @@
 {
   "name": "@PartyDAO/diamante-mine",
-  "description": "Diamante Mining Smart Contract",
   "version": "1.0.0",
-  "dependencies": {
-    "@openzeppelin/contracts": "^5.3.0",
-    "@openzeppelin/contracts-upgradeable": "^5.3.0",
-    "@uniswap/permit2": "Uniswap/permit2",
-    "solmate": "^6.8.0"
-  },
-  "devDependencies": {
-    "forge-std": "github:foundry-rs/forge-std#v1.9.7",
-    "prettier": "^3.6.1",
-    "solhint": "^5.1.0"
-  },
+  "private": true,
+  "description": "Diamante Mining Smart Contract",
   "keywords": [
     "blockchain",
     "ethereum",
@@ -22,7 +12,6 @@
     "solidity",
     "template"
   ],
-  "private": true,
   "scripts": {
     "clean": "rm -rf cache out",
     "build": "forge build",
@@ -34,5 +23,16 @@
     "test": "forge test",
     "test:coverage": "forge coverage",
     "test:coverage:report": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.3.0",
+    "@openzeppelin/contracts-upgradeable": "^5.3.0",
+    "@uniswap/permit2": "Uniswap/permit2",
+    "solmate": "^6.8.0"
+  },
+  "devDependencies": {
+    "forge-std": "github:foundry-rs/forge-std#v1.9.7",
+    "prettier": "^3.6.1",
+    "solhint": "^5.1.0"
   }
 }
