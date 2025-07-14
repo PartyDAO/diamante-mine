@@ -4,8 +4,11 @@ pragma solidity ^0.8.30;
 import { Script } from "forge-std/Script.sol";
 import { console } from "forge-std/console.sol";
 import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
+import { DiamanteMineV1Dev } from "../src/DiamanteMineV1.dev.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 import { ByteHasher } from "../src/utils/ByteHasher.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IWorldID } from "../src/interfaces/IWorldID.sol";
 
 struct Config {
     string label;
@@ -14,8 +17,66 @@ struct Config {
     string actionId;
 }
 
+struct DevState {
+    IERC20 diamante;
+    IERC20 oro;
+    IWorldID worldId;
+    uint256 minAmountOro;
+    uint256 maxAmountOro;
+    uint256 minReward;
+    uint256 extraRewardPerLevel;
+    uint256 maxRewardLevel;
+    uint256 referralBonusBps;
+    uint256 miningInterval;
+    string actionId;
+}
+
+struct ProdState {
+    IERC20 diamante;
+    IERC20 oro;
+    IWorldID worldId;
+    uint256 minAmountOro;
+    uint256 maxAmountOro;
+    uint256 minReward;
+    uint256 extraRewardPerLevel;
+    uint256 maxRewardLevel;
+    uint256 referralBonusBps;
+    uint256 miningInterval;
+    string actionId;
+}
+
 contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
+
+    // Production configuration
+    ProdState public prodState = ProdState({
+        diamante: IERC20(0x2ba918fec90Ca7AaC5753a2551593470815866e6),
+        oro: IERC20(0xcd1E32B86953D79a6AC58e813D2EA7a1790cAb63),
+        worldId: IWorldID(0x17B354dD2595411ff79041f930e491A4Df39A278),
+        minAmountOro: 1 ether,
+        maxAmountOro: 1 ether,
+        minReward: 0.05 ether,
+        extraRewardPerLevel: 0.08333 ether, // (0.8 - 0.05) / 9 = 0.08333...
+        maxRewardLevel: 10,
+        referralBonusBps: 10_000, // 100% bonus
+        miningInterval: 24 hours,
+        actionId: "mine"
+    });
+
+    // Development configuration for non-production environments
+    DevState public devState = DevState({
+        diamante: IERC20(0xFc46DC32F6Adb60d65012f7e943c3f29EB867796),
+        oro: IERC20(0x27Ef8b2c8d843343243D7FF9445D6F7F283d911b),
+        worldId: IWorldID(0x17B354dD2595411ff79041f930e491A4Df39A278),
+        minAmountOro: 1 ether,
+        maxAmountOro: 10 ether,
+        minReward: 100 ether,
+        extraRewardPerLevel: 50 ether,
+        maxRewardLevel: 10,
+        referralBonusBps: 500, // 5%
+        miningInterval: 1 days,
+        actionId: "mine"
+    });
 
     // Last Updated: 2025-07-10
     // From https://github.com/PartyDAO/partyworld/blob/staging/apps/diamante/src/config.ts#L25
@@ -61,6 +122,7 @@ contract ValidateDeploysScript is Script {
     ISignatureTransfer public constant PERMIT2 = ISignatureTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     DiamanteMineV1 public implementation = DiamanteMineV1(0x0b2FE6e893c1344B9fB1B5E3ed6559E4D543e1cd);
+    DiamanteMineV1Dev public devImplementation;
 
     function run() external {
         // Check if we have any proxies to upgrade
@@ -71,50 +133,85 @@ contract ValidateDeploysScript is Script {
 
         vm.startBroadcast();
 
-        // 1. Deploy the new implementation contract.
+        // 1. Deploy the implementation contracts.
         if (address(implementation) == address(0)) {
             implementation = new DiamanteMineV1(PERMIT2);
             console.log("New DiamanteMineV1 implementation deployed to:", address(implementation));
         }
 
-        // 2. Upgrade each proxy to the new implementation.
+        devImplementation = new DiamanteMineV1Dev(PERMIT2);
+        console.log("New DiamanteMineV1Dev implementation deployed to:", address(devImplementation));
+
+        // 2. Upgrade each proxy to the appropriate implementation.
         uint256 upgradedCount = 0;
         for (uint256 i = 0; i < configs.length; i++) {
             Config memory config = configs[i];
             address proxyAddress = config.addr;
             console.log("Checking proxy '%s' at address:", config.label, proxyAddress);
 
-            DiamanteMineV1 proxy = DiamanteMineV1(proxyAddress);
+            bool isProduction = keccak256(abi.encodePacked(config.label)) == keccak256(abi.encodePacked("production"));
+            address targetImplementation = isProduction ? address(implementation) : address(devImplementation);
 
             // Check EXTERNAL_NULLIFIER
             uint256 expectedExternalNullifier =
                 abi.encodePacked(abi.encodePacked(bytes(config.appId)).hashToField(), config.actionId).hashToField();
-            uint256 proxyExternalNullifier = proxy.EXTERNAL_NULLIFIER();
 
-            if (proxyExternalNullifier != expectedExternalNullifier) {
-                console.log("! Incorrect EXTERNAL_NULLIFIER for proxy '%s'.", config.label);
-                console.log("  Expected:", expectedExternalNullifier);
-                console.log("  Actual:  ", proxyExternalNullifier);
-                // solhint-disable-next-line gas-custom-errors
-                revert("External nullifier mismatch");
+            if (isProduction) {
+                DiamanteMineV1 proxy = DiamanteMineV1(proxyAddress);
+                uint256 proxyExternalNullifier = proxy.EXTERNAL_NULLIFIER();
+
+                if (proxyExternalNullifier != expectedExternalNullifier) {
+                    console.log("! Incorrect EXTERNAL_NULLIFIER for proxy '%s'.", config.label);
+                    console.log("  Expected:", expectedExternalNullifier);
+                    console.log("  Actual:  ", proxyExternalNullifier);
+                    // solhint-disable-next-line gas-custom-errors
+                    revert("External nullifier mismatch");
+                } else {
+                    console.log(
+                        "-> Proxy '%s' uses the correct EXTERNAL_NULLIFIER:", config.label, proxyExternalNullifier
+                    );
+                }
+
+                // Validate production configuration
+                _validateProdState(proxy, config.label);
             } else {
-                console.log("-> Proxy '%s' uses the correct EXTERNAL_NULLIFIER:", config.label, proxyExternalNullifier);
+                DiamanteMineV1Dev proxy = DiamanteMineV1Dev(proxyAddress);
+                uint256 proxyExternalNullifier = proxy.EXTERNAL_NULLIFIER();
+
+                if (proxyExternalNullifier != expectedExternalNullifier) {
+                    console.log("! Incorrect EXTERNAL_NULLIFIER for proxy '%s'.", config.label);
+                    console.log("  Expected:", expectedExternalNullifier);
+                    console.log("  Actual:  ", proxyExternalNullifier);
+                    // solhint-disable-next-line gas-custom-errors
+                    revert("External nullifier mismatch");
+                } else {
+                    console.log(
+                        "-> Proxy '%s' uses the correct EXTERNAL_NULLIFIER:", config.label, proxyExternalNullifier
+                    );
+                }
+
+                // Validate dev configuration
+                _validateDevState(proxy, config.label);
             }
 
             // Get the current implementation address by reading the EIP-1967 storage slot.
             bytes32 implementationSlot = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
             address currentImplementation = address(uint160(uint256(vm.load(proxyAddress, implementationSlot))));
             console.log("Current implementation:", currentImplementation);
-            console.log("New implementation:    ", address(implementation));
+            console.log("Target implementation: ", targetImplementation);
 
             // Check if the implementation is already the same
-            if (currentImplementation == address(implementation)) {
-                console.log("-> Proxy '%s' already uses the latest implementation. Skipping upgrade.", config.label);
+            if (currentImplementation == targetImplementation) {
+                console.log("-> Proxy '%s' already uses the correct implementation. Skipping upgrade.", config.label);
                 continue;
             }
 
             console.log("Upgrading proxy '%s'...", config.label);
-            proxy.upgradeToAndCall(address(implementation), "");
+            if (isProduction) {
+                DiamanteMineV1(proxyAddress).upgradeToAndCall(targetImplementation, "");
+            } else {
+                DiamanteMineV1Dev(proxyAddress).upgradeToAndCall(targetImplementation, "");
+            }
 
             upgradedCount++;
             console.log("Successfully upgraded proxy '%s'", config.label);
@@ -127,5 +224,203 @@ contract ValidateDeploysScript is Script {
         console.log("Skipped upgrades:", configs.length - upgradedCount);
 
         vm.stopBroadcast();
+    }
+
+    function _validateDevState(DiamanteMineV1Dev proxy, string memory label) internal view {
+        console.log("Validating dev configuration for '%s':", label);
+
+        // Check DIAMANTE token
+        if (address(proxy.DIAMANTE()) != address(devState.diamante)) {
+            console.log("! Incorrect DIAMANTE token for proxy '%s'.", label);
+            console.log("  Expected:", address(devState.diamante));
+            console.log("  Actual:  ", address(proxy.DIAMANTE()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("DIAMANTE token mismatch");
+        }
+
+        // Check ORO token
+        if (address(proxy.ORO()) != address(devState.oro)) {
+            console.log("! Incorrect ORO token for proxy '%s'.", label);
+            console.log("  Expected:", address(devState.oro));
+            console.log("  Actual:  ", address(proxy.ORO()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("ORO token mismatch");
+        }
+
+        // Check World ID
+        if (address(proxy.WORLD_ID()) != address(devState.worldId)) {
+            console.log("! Incorrect World ID for proxy '%s'.", label);
+            console.log("  Expected:", address(devState.worldId));
+            console.log("  Actual:  ", address(proxy.WORLD_ID()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("World ID mismatch");
+        }
+
+        // Check minAmountOro
+        if (proxy.minAmountOro() != devState.minAmountOro) {
+            console.log("! Incorrect minAmountOro for proxy '%s'.", label);
+            console.log("  Expected:", devState.minAmountOro);
+            console.log("  Actual:  ", proxy.minAmountOro());
+            // solhint-disable-next-line gas-custom-errors
+            revert("minAmountOro mismatch");
+        }
+
+        // Check maxAmountOro
+        if (proxy.maxAmountOro() != devState.maxAmountOro) {
+            console.log("! Incorrect maxAmountOro for proxy '%s'.", label);
+            console.log("  Expected:", devState.maxAmountOro);
+            console.log("  Actual:  ", proxy.maxAmountOro());
+            // solhint-disable-next-line gas-custom-errors
+            revert("maxAmountOro mismatch");
+        }
+
+        // Check minReward
+        if (proxy.minReward() != devState.minReward) {
+            console.log("! Incorrect minReward for proxy '%s'.", label);
+            console.log("  Expected:", devState.minReward);
+            console.log("  Actual:  ", proxy.minReward());
+            // solhint-disable-next-line gas-custom-errors
+            revert("minReward mismatch");
+        }
+
+        // Check extraRewardPerLevel
+        if (proxy.extraRewardPerLevel() != devState.extraRewardPerLevel) {
+            console.log("! Incorrect extraRewardPerLevel for proxy '%s'.", label);
+            console.log("  Expected:", devState.extraRewardPerLevel);
+            console.log("  Actual:  ", proxy.extraRewardPerLevel());
+            // solhint-disable-next-line gas-custom-errors
+            revert("extraRewardPerLevel mismatch");
+        }
+
+        // Check maxRewardLevel
+        if (proxy.maxRewardLevel() != devState.maxRewardLevel) {
+            console.log("! Incorrect maxRewardLevel for proxy '%s'.", label);
+            console.log("  Expected:", devState.maxRewardLevel);
+            console.log("  Actual:  ", proxy.maxRewardLevel());
+            // solhint-disable-next-line gas-custom-errors
+            revert("maxRewardLevel mismatch");
+        }
+
+        // Check referralBonusBps
+        if (proxy.referralBonusBps() != devState.referralBonusBps) {
+            console.log("! Incorrect referralBonusBps for proxy '%s'.", label);
+            console.log("  Expected:", devState.referralBonusBps);
+            console.log("  Actual:  ", proxy.referralBonusBps());
+            // solhint-disable-next-line gas-custom-errors
+            revert("referralBonusBps mismatch");
+        }
+
+        // Check miningInterval
+        if (proxy.miningInterval() != devState.miningInterval) {
+            console.log("! Incorrect miningInterval for proxy '%s'.", label);
+            console.log("  Expected:", devState.miningInterval);
+            console.log("  Actual:  ", proxy.miningInterval());
+            // solhint-disable-next-line gas-custom-errors
+            revert("miningInterval mismatch");
+        }
+
+        console.log("-> All configuration values are correct for proxy '%s'", label);
+    }
+
+    function _validateProdState(DiamanteMineV1 proxy, string memory label) internal view {
+        console.log("Validating production configuration for '%s':", label);
+
+        // Skip validation if production config is not set (all zeros)
+        if (address(prodState.diamante) == address(0)) {
+            console.log("-> Production configuration not set, skipping validation for '%s'", label);
+            return;
+        }
+
+        // Check DIAMANTE token
+        if (address(proxy.DIAMANTE()) != address(prodState.diamante)) {
+            console.log("! Incorrect DIAMANTE token for proxy '%s'.", label);
+            console.log("  Expected:", address(prodState.diamante));
+            console.log("  Actual:  ", address(proxy.DIAMANTE()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("DIAMANTE token mismatch");
+        }
+
+        // Check ORO token
+        if (address(proxy.ORO()) != address(prodState.oro)) {
+            console.log("! Incorrect ORO token for proxy '%s'.", label);
+            console.log("  Expected:", address(prodState.oro));
+            console.log("  Actual:  ", address(proxy.ORO()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("ORO token mismatch");
+        }
+
+        // Check World ID
+        if (address(proxy.WORLD_ID()) != address(prodState.worldId)) {
+            console.log("! Incorrect World ID for proxy '%s'.", label);
+            console.log("  Expected:", address(prodState.worldId));
+            console.log("  Actual:  ", address(proxy.WORLD_ID()));
+            // solhint-disable-next-line gas-custom-errors
+            revert("World ID mismatch");
+        }
+
+        // Check minAmountOro
+        if (proxy.minAmountOro() != prodState.minAmountOro) {
+            console.log("! Incorrect minAmountOro for proxy '%s'.", label);
+            console.log("  Expected:", prodState.minAmountOro);
+            console.log("  Actual:  ", proxy.minAmountOro());
+            // solhint-disable-next-line gas-custom-errors
+            revert("minAmountOro mismatch");
+        }
+
+        // Check maxAmountOro
+        if (proxy.maxAmountOro() != prodState.maxAmountOro) {
+            console.log("! Incorrect maxAmountOro for proxy '%s'.", label);
+            console.log("  Expected:", prodState.maxAmountOro);
+            console.log("  Actual:  ", proxy.maxAmountOro());
+            // solhint-disable-next-line gas-custom-errors
+            revert("maxAmountOro mismatch");
+        }
+
+        // Check minReward
+        if (proxy.minReward() != prodState.minReward) {
+            console.log("! Incorrect minReward for proxy '%s'.", label);
+            console.log("  Expected:", prodState.minReward);
+            console.log("  Actual:  ", proxy.minReward());
+            // solhint-disable-next-line gas-custom-errors
+            revert("minReward mismatch");
+        }
+
+        // Check extraRewardPerLevel
+        if (proxy.extraRewardPerLevel() != prodState.extraRewardPerLevel) {
+            console.log("! Incorrect extraRewardPerLevel for proxy '%s'.", label);
+            console.log("  Expected:", prodState.extraRewardPerLevel);
+            console.log("  Actual:  ", proxy.extraRewardPerLevel());
+            // solhint-disable-next-line gas-custom-errors
+            revert("extraRewardPerLevel mismatch");
+        }
+
+        // Check maxRewardLevel
+        if (proxy.maxRewardLevel() != prodState.maxRewardLevel) {
+            console.log("! Incorrect maxRewardLevel for proxy '%s'.", label);
+            console.log("  Expected:", prodState.maxRewardLevel);
+            console.log("  Actual:  ", proxy.maxRewardLevel());
+            // solhint-disable-next-line gas-custom-errors
+            revert("maxRewardLevel mismatch");
+        }
+
+        // Check referralBonusBps
+        if (proxy.referralBonusBps() != prodState.referralBonusBps) {
+            console.log("! Incorrect referralBonusBps for proxy '%s'.", label);
+            console.log("  Expected:", prodState.referralBonusBps);
+            console.log("  Actual:  ", proxy.referralBonusBps());
+            // solhint-disable-next-line gas-custom-errors
+            revert("referralBonusBps mismatch");
+        }
+
+        // Check miningInterval
+        if (proxy.miningInterval() != prodState.miningInterval) {
+            console.log("! Incorrect miningInterval for proxy '%s'.", label);
+            console.log("  Expected:", prodState.miningInterval);
+            console.log("  Actual:  ", proxy.miningInterval());
+            // solhint-disable-next-line gas-custom-errors
+            revert("miningInterval mismatch");
+        }
+
+        console.log("-> All configuration values are correct for proxy '%s'", label);
     }
 }
