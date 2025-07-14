@@ -317,6 +317,46 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         return remindedUserStartTime > startedAt && remindedUserStartTime - startedAt < miningInterval;
     }
 
+    /// @notice Calculates the potential reward range for a given ORO amount.
+    /// @dev This function provides the minimum and maximum possible rewards based on
+    ///      the current contract parameters, ignoring referral bonuses for simplicity.
+    /// @param oroAmount The amount of ORO to calculate rewards for.
+    /// @return minTotalReward The minimum possible reward.
+    /// @return maxTotalReward The maximum possible reward.
+    function calculateRewardRangeForAmount(uint256 oroAmount)
+        public
+        view
+        returns (uint256 minTotalReward, uint256 maxTotalReward)
+    {
+        // Validate ORO amount is within acceptable range
+        if (oroAmount < minAmountOro || oroAmount > maxAmountOro) {
+            return (0, 0);
+        }
+
+        // Calculate minimum reward (when there are no active miners, rewardLevel = 0)
+        uint256 minBaseRewardAmount = minReward;
+        minTotalReward = (minBaseRewardAmount * oroAmount) / 1e18;
+
+        // Calculate maximum reward (when at maximum reward level)
+        uint256 maxBaseRewardAmount = minReward + (extraRewardPerLevel * maxRewardLevel);
+        maxTotalReward = (maxBaseRewardAmount * oroAmount) / 1e18;
+    }
+
+    /// @notice Calculates the potential reward range for a user's current mining session.
+    /// @param user The address of the user to check.
+    /// @return minTotalReward The minimum possible reward for the current session.
+    /// @return maxTotalReward The maximum possible reward for the current session.
+    function calculateRewardRangeForUser(address user)
+        public
+        view
+        returns (uint256 minTotalReward, uint256 maxTotalReward)
+    {
+        uint256 nullifierHash = addressToNullifierHash[user];
+        uint256 oroAmount = amountOroMinedWith[nullifierHash];
+
+        return calculateRewardRangeForAmount(oroAmount);
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                     CORE
     //////////////////////////////////////////////////////////////////////////////*/

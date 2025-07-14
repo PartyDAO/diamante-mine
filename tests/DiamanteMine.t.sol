@@ -1122,6 +1122,509 @@ contract DiamanteMineTest is Test {
     }
 
     //-//////////////////////////////////////////////////////////////////////////
+    //- CALCULATE REWARD RANGE TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_CalculateRewardRange_BasicFunctionality() public view {
+        // Test basic functionality with valid ORO amounts
+        uint256 oroAmount = 5 * 1e18; // 5 ORO
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Calculate expected values
+        uint256 expectedMinReward = (diamanteMine.minReward() * oroAmount) / 1e18;
+        uint256 expectedMaxReward = (
+            (diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel()))
+                * oroAmount
+        ) / 1e18;
+
+        assertEq(minReward, expectedMinReward, "Min reward should match expected calculation");
+        assertEq(maxReward, expectedMaxReward, "Max reward should match expected calculation");
+        assertTrue(maxReward > minReward, "Max reward should be greater than min reward");
+    }
+
+    function test_CalculateRewardRange_MinOroAmount() public view {
+        // Test with minimum allowed ORO amount
+        uint256 oroAmount = diamanteMine.minAmountOro();
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Should return valid rewards for minimum amount
+        assertTrue(minReward > 0, "Min reward should be greater than 0 for valid amount");
+        assertTrue(maxReward > minReward, "Max reward should be greater than min reward");
+
+        // Verify calculations
+        uint256 expectedMinReward = (diamanteMine.minReward() * oroAmount) / 1e18;
+        assertEq(minReward, expectedMinReward, "Min reward calculation should be correct");
+    }
+
+    function test_CalculateRewardRange_MaxOroAmount() public view {
+        // Test with maximum allowed ORO amount
+        uint256 oroAmount = diamanteMine.maxAmountOro();
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Should return valid rewards for maximum amount
+        assertTrue(minReward > 0, "Min reward should be greater than 0 for valid amount");
+        assertTrue(maxReward > minReward, "Max reward should be greater than min reward");
+
+        // Verify calculations
+        uint256 expectedMaxBaseReward =
+            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
+        uint256 expectedMaxReward = (expectedMaxBaseReward * oroAmount) / 1e18;
+        assertEq(maxReward, expectedMaxReward, "Max reward calculation should be correct");
+    }
+
+    function test_CalculateRewardRange_InvalidAmounts() public view {
+        // Test with amount below minimum
+        uint256 tooLow = diamanteMine.minAmountOro() - 1;
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForAmount(tooLow);
+        assertEq(minReward1, 0, "Should return 0 for amount below minimum");
+        assertEq(maxReward1, 0, "Should return 0 for amount below minimum");
+
+        // Test with amount above maximum
+        uint256 tooHigh = diamanteMine.maxAmountOro() + 1;
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForAmount(tooHigh);
+        assertEq(minReward2, 0, "Should return 0 for amount above maximum");
+        assertEq(maxReward2, 0, "Should return 0 for amount above maximum");
+
+        // Test with zero amount
+        (uint256 minReward3, uint256 maxReward3) = diamanteMine.calculateRewardRangeForAmount(0);
+        assertEq(minReward3, 0, "Should return 0 for zero amount");
+        assertEq(maxReward3, 0, "Should return 0 for zero amount");
+    }
+
+    function test_CalculateRewardRange_LinearScaling() public view {
+        // Test that rewards scale linearly with ORO amount
+        uint256 baseAmount = 2 * 1e18;
+        uint256 doubleAmount = 4 * 1e18;
+        uint256 tripleAmount = 6 * 1e18;
+
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForAmount(baseAmount);
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForAmount(doubleAmount);
+        (uint256 minReward3, uint256 maxReward3) = diamanteMine.calculateRewardRangeForAmount(tripleAmount);
+
+        // Verify linear scaling
+        assertEq(minReward2, minReward1 * 2, "Min reward should scale linearly (2x)");
+        assertEq(maxReward2, maxReward1 * 2, "Max reward should scale linearly (2x)");
+        assertEq(minReward3, minReward1 * 3, "Min reward should scale linearly (3x)");
+        assertEq(maxReward3, maxReward1 * 3, "Max reward should scale linearly (3x)");
+    }
+
+    function test_CalculateRewardRange_PrecisionEdgeCases() public view {
+        // Test with very small amounts that might cause precision issues
+        uint256 smallAmount = diamanteMine.minAmountOro(); // 1 ORO
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(smallAmount);
+
+        // With 1 ORO and minReward = 0.1 * 1e18, we should get 0.1 * 1e18 * 1e18 / 1e18 = 0.1 * 1e18
+        uint256 expectedMinReward = (diamanteMine.minReward() * smallAmount) / 1e18;
+        assertEq(minReward, expectedMinReward, "Small amount precision should be correct");
+        assertTrue(maxReward > minReward, "Max reward should be greater than min reward");
+
+        // Test with fractional ORO amounts (if supported)
+        uint256 fractionalAmount = 1.5 * 1e18; // 1.5 ORO
+        if (fractionalAmount >= diamanteMine.minAmountOro() && fractionalAmount <= diamanteMine.maxAmountOro()) {
+            (uint256 fracMinReward, uint256 fracMaxReward) =
+                diamanteMine.calculateRewardRangeForAmount(fractionalAmount);
+            assertTrue(fracMinReward > 0, "Fractional amount should return valid reward");
+            assertTrue(fracMaxReward > fracMinReward, "Fractional max should be greater than min");
+        }
+    }
+
+    function test_CalculateRewardRange_ConsistencyWithActualMining() public {
+        // Test that the range includes actual mining rewards
+        uint256 oroAmount = 3 * 1e18;
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Test with 1 miner (should get minimum reward)
+        _startMiningAs(user1, address(0), oroAmount);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        uint256 initialBalance = diamanteToken.balanceOf(user1);
+        _finishMiningAs(user1);
+        uint256 actualReward = diamanteToken.balanceOf(user1) - initialBalance;
+
+        // Actual reward should be equal to or greater than min (could be higher due to level bonuses)
+        assertTrue(actualReward >= minReward, "Actual reward should be >= calculated min reward");
+        assertTrue(actualReward <= maxReward, "Actual reward should be <= calculated max reward");
+    }
+
+    function test_CalculateRewardRange_WithParameterChanges() public {
+        uint256 oroAmount = 5 * 1e18;
+
+        // Get initial range
+        (uint256 initialMinReward, uint256 initialMaxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Change minReward
+        vm.startPrank(owner);
+        diamanteMine.setMinReward(diamanteMine.minReward() * 2);
+        vm.stopPrank();
+
+        (uint256 newMinReward, uint256 newMaxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Both min and max should increase proportionally
+        assertTrue(newMinReward > initialMinReward, "Min reward should increase when minReward increases");
+        assertTrue(newMaxReward > initialMaxReward, "Max reward should increase when minReward increases");
+
+        // Reset and test extraRewardPerLevel change
+        vm.startPrank(owner);
+        diamanteMine.setMinReward(MIN_REWARD);
+        diamanteMine.setExtraRewardPerLevel(diamanteMine.extraRewardPerLevel() * 2);
+        vm.stopPrank();
+
+        (uint256 newMinReward2, uint256 newMaxReward2) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Min should stay the same, max should increase
+        assertEq(newMinReward2, initialMinReward, "Min reward should stay same when extraRewardPerLevel changes");
+        assertTrue(newMaxReward2 > initialMaxReward, "Max reward should increase when extraRewardPerLevel increases");
+    }
+
+    function test_CalculateRewardRange_WithMaxRewardLevelChanges() public {
+        uint256 oroAmount = 5 * 1e18;
+
+        // Get initial range
+        (uint256 initialMinReward, uint256 initialMaxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Change maxRewardLevel
+        vm.startPrank(owner);
+        diamanteMine.setMaxRewardLevel(diamanteMine.maxRewardLevel() * 2);
+        vm.stopPrank();
+
+        (uint256 newMinReward, uint256 newMaxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        // Min should stay the same, max should increase
+        assertEq(newMinReward, initialMinReward, "Min reward should stay same when maxRewardLevel changes");
+        assertTrue(newMaxReward > initialMaxReward, "Max reward should increase when maxRewardLevel increases");
+    }
+
+    function test_CalculateRewardRange_MultipleOroAmounts() public view {
+        // Test with various ORO amounts to ensure consistent behavior
+        uint256[] memory testAmounts = new uint256[](5);
+        testAmounts[0] = diamanteMine.minAmountOro();
+        testAmounts[1] = 5 * 1e18;
+        testAmounts[2] = 25 * 1e18;
+        testAmounts[3] = 50 * 1e18;
+        testAmounts[4] = diamanteMine.maxAmountOro();
+
+        for (uint256 i = 0; i < testAmounts.length; i++) {
+            (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForAmount(testAmounts[i]);
+
+            assertTrue(
+                minReward > 0,
+                string(abi.encodePacked("Min reward should be > 0 for amount ", _toString(testAmounts[i] / 1e18)))
+            );
+            assertTrue(
+                maxReward > minReward,
+                string(abi.encodePacked("Max reward should be > min for amount ", _toString(testAmounts[i] / 1e18)))
+            );
+
+            // Verify the range makes sense relative to the ORO amount
+            if (i > 0) {
+                (uint256 prevMinReward, uint256 prevMaxReward) =
+                    diamanteMine.calculateRewardRangeForAmount(testAmounts[i - 1]);
+                assertTrue(minReward > prevMinReward, "Min reward should increase with ORO amount");
+                assertTrue(maxReward > prevMaxReward, "Max reward should increase with ORO amount");
+            }
+        }
+    }
+
+    function test_CalculateRewardRange_GasEfficiency() public view {
+        // Test that the function is gas efficient
+        uint256 gasBefore = gasleft();
+        diamanteMine.calculateRewardRangeForAmount(5 * 1e18);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Should be reasonable gas usage for a view function (increased threshold)
+        assertTrue(gasUsed < 50_000, "calculateRewardRange should be gas efficient");
+    }
+
+    function test_CalculateRewardRange_BoundaryConditions() public view {
+        // Test right at the boundaries
+        uint256 minOro = diamanteMine.minAmountOro();
+        uint256 maxOro = diamanteMine.maxAmountOro();
+
+        // Test minAmountOro - 1 wei
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForAmount(minOro - 1);
+        assertEq(minReward1, 0, "Should return 0 for minAmountOro - 1");
+        assertEq(maxReward1, 0, "Should return 0 for minAmountOro - 1");
+
+        // Test minAmountOro exactly
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForAmount(minOro);
+        assertTrue(minReward2 > 0, "Should return > 0 for minAmountOro exactly");
+        assertTrue(maxReward2 > 0, "Should return > 0 for minAmountOro exactly");
+
+        // Test maxAmountOro exactly
+        (uint256 minReward3, uint256 maxReward3) = diamanteMine.calculateRewardRangeForAmount(maxOro);
+        assertTrue(minReward3 > 0, "Should return > 0 for maxAmountOro exactly");
+        assertTrue(maxReward3 > 0, "Should return > 0 for maxAmountOro exactly");
+
+        // Test maxAmountOro + 1 wei
+        (uint256 minReward4, uint256 maxReward4) = diamanteMine.calculateRewardRangeForAmount(maxOro + 1);
+        assertEq(minReward4, 0, "Should return 0 for maxAmountOro + 1");
+        assertEq(maxReward4, 0, "Should return 0 for maxAmountOro + 1");
+    }
+
+    function test_CalculateRewardRange_CompareWithMaxRewardFunction() public view {
+        // The max reward from calculateRewardRange should be less than or equal to maxReward()
+        // since maxReward() includes referral bonus
+        uint256 maxOro = diamanteMine.maxAmountOro();
+        (, uint256 calculatedMaxReward) = diamanteMine.calculateRewardRangeForAmount(maxOro);
+        uint256 contractMaxReward = diamanteMine.maxReward();
+
+        // calculatedMaxReward should be less than contractMaxReward because contractMaxReward includes referral bonus
+        assertTrue(
+            calculatedMaxReward <= contractMaxReward, "Calculated max reward should be <= contract's maxReward()"
+        );
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- CALCULATE REWARD RANGE FOR USER TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_CalculateRewardRangeForUser_ActiveMiner() public {
+        // Test calculating reward range for a user who is currently mining
+        uint256 oroAmount = 5 * 1e18;
+        _startMiningAs(user1, address(0), oroAmount);
+
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForUser(user1);
+
+        // Should return the same result as calculateRewardRangeForAmount
+        (uint256 expectedMinReward, uint256 expectedMaxReward) = diamanteMine.calculateRewardRangeForAmount(oroAmount);
+
+        assertEq(minReward, expectedMinReward, "Min reward should match calculateRewardRangeForAmount");
+        assertEq(maxReward, expectedMaxReward, "Max reward should match calculateRewardRangeForAmount");
+        assertTrue(minReward > 0, "Min reward should be greater than 0 for active miner");
+        assertTrue(maxReward > minReward, "Max reward should be greater than min reward");
+    }
+
+    function test_CalculateRewardRangeForUser_NotMining() public view {
+        // Test calculating reward range for a user who is not mining
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForUser(user1);
+
+        // Should return 0 for both since user is not mining (oroAmount = 0)
+        assertEq(minReward, 0, "Min reward should be 0 for non-mining user");
+        assertEq(maxReward, 0, "Max reward should be 0 for non-mining user");
+    }
+
+    function test_CalculateRewardRangeForUser_FinishedMining() public {
+        // Test calculating reward range for a user who finished mining
+        uint256 oroAmount = 3 * 1e18;
+        _startMiningAs(user1, address(0), oroAmount);
+
+        // Verify user is mining and has a reward range
+        (uint256 minRewardBefore, uint256 maxRewardBefore) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertTrue(minRewardBefore > 0, "Should have reward range while mining");
+        assertTrue(maxRewardBefore > minRewardBefore, "Max should be greater than min while mining");
+
+        // User finishes mining
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(user1);
+
+        // After finishing, should return 0 (no active mining session)
+        (uint256 minRewardAfter, uint256 maxRewardAfter) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertEq(minRewardAfter, 0, "Min reward should be 0 after finishing mining");
+        assertEq(maxRewardAfter, 0, "Max reward should be 0 after finishing mining");
+    }
+
+    function test_CalculateRewardRangeForUser_DifferentOroAmounts() public {
+        // Test with different ORO amounts for different users
+        uint256 oroAmount1 = 2 * 1e18;
+        uint256 oroAmount2 = 8 * 1e18;
+
+        _startMiningAs(user1, address(0), oroAmount1);
+        _startMiningAs(user2, address(0), oroAmount2);
+
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForUser(user1);
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForUser(user2);
+
+        // User2 should have higher rewards due to higher ORO amount
+        assertTrue(minReward2 > minReward1, "User2 min reward should be higher");
+        assertTrue(maxReward2 > maxReward1, "User2 max reward should be higher");
+
+        // Verify 4x relationship (8 ORO vs 2 ORO)
+        assertEq(minReward2, minReward1 * 4, "Should scale linearly with ORO amount");
+        assertEq(maxReward2, maxReward1 * 4, "Should scale linearly with ORO amount");
+    }
+
+    function test_CalculateRewardRangeForUser_ConsistencyWithAmount() public {
+        // Test that calculateRewardRangeForUser returns same result as calculateRewardRangeForAmount
+        uint256[] memory testAmounts = new uint256[](4);
+        testAmounts[0] = diamanteMine.minAmountOro();
+        testAmounts[1] = 5 * 1e18;
+        testAmounts[2] = 25 * 1e18;
+        testAmounts[3] = diamanteMine.maxAmountOro();
+
+        for (uint256 i = 0; i < testAmounts.length; i++) {
+            address testUser = address(uint160(uint256(keccak256(abi.encodePacked("test_user", i)))));
+            oroToken.mint(testUser, 1000 * 1e18);
+
+            vm.prank(testUser);
+            oroToken.approve(address(mockPermit2), type(uint256).max);
+
+            _startMiningAs(testUser, address(0), testAmounts[i]);
+
+            (uint256 userMinReward, uint256 userMaxReward) = diamanteMine.calculateRewardRangeForUser(testUser);
+            (uint256 amountMinReward, uint256 amountMaxReward) =
+                diamanteMine.calculateRewardRangeForAmount(testAmounts[i]);
+
+            assertEq(
+                userMinReward,
+                amountMinReward,
+                string(
+                    abi.encodePacked(
+                        "User min reward should match amount calculation for ", _toString(testAmounts[i] / 1e18), " ORO"
+                    )
+                )
+            );
+            assertEq(
+                userMaxReward,
+                amountMaxReward,
+                string(
+                    abi.encodePacked(
+                        "User max reward should match amount calculation for ", _toString(testAmounts[i] / 1e18), " ORO"
+                    )
+                )
+            );
+        }
+    }
+
+    function test_CalculateRewardRangeForUser_MultipleUsers() public {
+        // Test with multiple users mining different amounts
+        address[] memory users = new address[](3);
+        uint256[] memory amounts = new uint256[](3);
+
+        users[0] = makeAddr("multi_user1");
+        users[1] = makeAddr("multi_user2");
+        users[2] = makeAddr("multi_user3");
+
+        amounts[0] = 1 * 1e18;
+        amounts[1] = 5 * 1e18;
+        amounts[2] = 10 * 1e18;
+
+        // Set up users and start mining
+        for (uint256 i = 0; i < users.length; i++) {
+            oroToken.mint(users[i], 1000 * 1e18);
+            vm.prank(users[i]);
+            oroToken.approve(address(mockPermit2), type(uint256).max);
+            _startMiningAs(users[i], address(0), amounts[i]);
+        }
+
+        // Verify each user has the correct reward range
+        for (uint256 i = 0; i < users.length; i++) {
+            (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForUser(users[i]);
+            (uint256 expectedMinReward, uint256 expectedMaxReward) =
+                diamanteMine.calculateRewardRangeForAmount(amounts[i]);
+
+            assertEq(
+                minReward,
+                expectedMinReward,
+                string(abi.encodePacked("User ", _toString(i), " min reward should be correct"))
+            );
+            assertEq(
+                maxReward,
+                expectedMaxReward,
+                string(abi.encodePacked("User ", _toString(i), " max reward should be correct"))
+            );
+        }
+    }
+
+    function test_CalculateRewardRangeForUser_ZeroAddress() public view {
+        // Test with zero address (should return 0 since no mining session)
+        (uint256 minReward, uint256 maxReward) = diamanteMine.calculateRewardRangeForUser(address(0));
+
+        assertEq(minReward, 0, "Min reward should be 0 for zero address");
+        assertEq(maxReward, 0, "Max reward should be 0 for zero address");
+    }
+
+    function test_CalculateRewardRangeForUser_GasEfficiency() public {
+        // Test that the function is gas efficient
+        uint256 oroAmount = 5 * 1e18;
+        _startMiningAs(user1, address(0), oroAmount);
+
+        uint256 gasBefore = gasleft();
+        diamanteMine.calculateRewardRangeForUser(user1);
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Should be reasonable gas usage for a view function
+        assertTrue(gasUsed < 50_000, "calculateRewardRangeForUser should be gas efficient");
+    }
+
+    function test_CalculateRewardRangeForUser_WithParameterChanges() public {
+        // Test that function responds correctly to parameter changes
+        uint256 oroAmount = 5 * 1e18;
+        _startMiningAs(user1, address(0), oroAmount);
+
+        // Get initial range
+        (uint256 initialMinReward, uint256 initialMaxReward) = diamanteMine.calculateRewardRangeForUser(user1);
+
+        // Change contract parameters
+        vm.startPrank(owner);
+        diamanteMine.setMinReward(diamanteMine.minReward() * 2);
+        vm.stopPrank();
+
+        // Get new range
+        (uint256 newMinReward, uint256 newMaxReward) = diamanteMine.calculateRewardRangeForUser(user1);
+
+        // Both should increase
+        assertTrue(newMinReward > initialMinReward, "Min reward should increase after parameter change");
+        assertTrue(newMaxReward > initialMaxReward, "Max reward should increase after parameter change");
+        assertTrue(newMinReward == initialMinReward * 2, "Min reward should double");
+    }
+
+    function test_CalculateRewardRangeForUser_EdgeCases() public {
+        // Test edge cases like minimum and maximum ORO amounts
+
+        // Test with minimum ORO amount
+        _startMiningAs(user1, address(0), diamanteMine.minAmountOro());
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertTrue(minReward1 > 0, "Should return valid range for minimum ORO amount");
+        assertTrue(maxReward1 > minReward1, "Max should be greater than min for minimum ORO");
+
+        // Finish mining and test with maximum ORO amount
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(user1);
+
+        _startMiningAs(user2, address(0), diamanteMine.maxAmountOro());
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForUser(user2);
+        assertTrue(minReward2 > 0, "Should return valid range for maximum ORO amount");
+        assertTrue(maxReward2 > minReward2, "Max should be greater than min for maximum ORO");
+
+        // Maximum ORO should give higher rewards
+        assertTrue(minReward2 > minReward1, "Maximum ORO should give higher min reward");
+        assertTrue(maxReward2 > maxReward1, "Maximum ORO should give higher max reward");
+    }
+
+    function test_CalculateRewardRangeForUser_StateTransitions() public {
+        // Test function behavior during different mining states
+        uint256 oroAmount = 5 * 1e18;
+
+        // 1. Before mining - should return 0
+        (uint256 minReward1, uint256 maxReward1) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertEq(minReward1, 0, "Should return 0 before mining");
+        assertEq(maxReward1, 0, "Should return 0 before mining");
+
+        // 2. During mining - should return valid range
+        _startMiningAs(user1, address(0), oroAmount);
+        (uint256 minReward2, uint256 maxReward2) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertTrue(minReward2 > 0, "Should return valid range during mining");
+        assertTrue(maxReward2 > minReward2, "Max should be greater than min during mining");
+
+        // 3. Ready to finish - should still return same range
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (uint256 minReward3, uint256 maxReward3) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertEq(minReward3, minReward2, "Range should be same when ready to finish");
+        assertEq(maxReward3, maxReward2, "Range should be same when ready to finish");
+
+        // 4. After finishing - should return 0
+        _finishMiningAs(user1);
+        (uint256 minReward4, uint256 maxReward4) = diamanteMine.calculateRewardRangeForUser(user1);
+        assertEq(minReward4, 0, "Should return 0 after finishing");
+        assertEq(maxReward4, 0, "Should return 0 after finishing");
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
     //- REFERRAL DATA ENCODING/DECODING TESTS
     //-//////////////////////////////////////////////////////////////////////////
 
