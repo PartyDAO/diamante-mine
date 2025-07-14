@@ -5,7 +5,7 @@ import { console } from "forge-std/console.sol";
 import { Script } from "forge-std/Script.sol";
 import { DiamanteMineV1Dev } from "../src/DiamanteMineV1.dev.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
-import { ERC20Mock } from "../tests/mocks/ERC20Mock.sol";
+import { ERC20Mock } from "../test/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 

@@ -13,7 +13,7 @@ out = "out"
 script = "script"
 solc = "0.8.30"
 src = "src"
-test = "tests"
+test = "test"
 lib = "node_modules"
 via_ir = true
 
