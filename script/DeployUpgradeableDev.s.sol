@@ -3,7 +3,7 @@ pragma solidity >=0.8.29 <0.9.0;
 
 import { console } from "forge-std/console.sol";
 import { Script } from "forge-std/Script.sol";
-import { DiamanteMineV1Dev } from "../src/DiamanteMineV1.dev.sol";
+import { DiamanteMineV1_1Dev } from "../src/DiamanteMineV1_1.dev.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
 import { ERC20Mock } from "../test/mocks/ERC20Mock.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -18,7 +18,7 @@ contract DeployUpgradeableDiamanteMineDev is Script {
         vm.startBroadcast();
 
         // Deploy implementation
-        DiamanteMineV1Dev implementation = new DiamanteMineV1Dev(PERMIT2);
+        DiamanteMineV1_1Dev implementation = new DiamanteMineV1_1Dev(PERMIT2);
         console.log("DiamanteMine implementation deployed to:", address(implementation));
 
         // Set deployment parameters
@@ -46,7 +46,7 @@ contract DeployUpgradeableDiamanteMineDev is Script {
 
             // Prepare initialization data
             bytes memory data = abi.encodeWithSelector(
-                DiamanteMineV1Dev.initialize.selector,
+                DiamanteMineV1_1Dev.initialize.selector,
                 msg.sender,
                 MOCK_DIAMANTE,
                 MOCK_ORO,

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-only
 pragma solidity ^0.8.30;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -10,22 +10,7 @@ import { ByteHasher } from "./utils/ByteHasher.sol";
 import { IWorldID } from "./interfaces/IWorldID.sol";
 import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helper.sol";
 
-// NOTE: Modified DiamanteMineV1.sol (v1.1.0) for testing with following changes:
-// - All functions are public for ease of testing (no access control)
-// - Added helper utils for testing:
-//   - `__setDiamante()`
-//   - `__setOro()`
-//   - `__setWorldID()`
-//   - `__disableVerificationUntil()`
-//   - `__disableBalanceCheckUntil()`
-//   - `__setLastMinedAt()`
-//   - `__setLastRemindedAddress()`
-//   - `__setAddressToNullifierHash()`
-//   - `__setAmountOroMinedWith()`
-//   - `__setActiveMiners()`
-//   - `__setExternalNullifier()`
-
-contract DiamanteMineV1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
+contract DiamanteMineV1_1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
 
@@ -165,10 +150,6 @@ contract DiamanteMineV1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable
 
     /// @notice The number of users currently mining.
     uint256 public activeMiners;
-
-    // Testing helpers
-    uint256 public verificationDisabledUntil;
-    uint256 public balanceCheckDisabledUntil;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ISignatureTransfer _permit2) Permit2Helper(_permit2) {
@@ -399,22 +380,16 @@ contract DiamanteMineV1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable
         // Decode mining arguments
         (address userToRemind, uint256 amount) = _decodeMiningArgs(args);
 
-        if (lastMinedAt[nullifierHash] != 0) revert AlreadyMining();
-        if (amount < minAmountOro || amount > maxAmountOro) {
-            revert InvalidOroAmount(amount, minAmountOro, maxAmountOro);
-        }
-        if (block.timestamp >= balanceCheckDisabledUntil) {
-            if (DIAMANTE.balanceOf(address(this)) < maxReward() * (activeMiners + 1)) {
-                revert InsufficientBalanceForReward();
-            }
-        }
+        require(userToRemind != msg.sender, CannotRemindSelf());
+
+        require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
+        require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
+        require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
 
         // Verify proof of personhood before any state changes
-        if (block.timestamp >= verificationDisabledUntil) {
-            WORLD_ID.verifyProof(
-                root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
-            );
-        }
+        WORLD_ID.verifyProof(
+            root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
+        );
 
         activeMiners++;
 
@@ -506,64 +481,64 @@ contract DiamanteMineV1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable
     //////////////////////////////////////////////////////////////////////////////*/
 
     // solhint-disable-next-line no-empty-blocks
-    function _authorizeUpgrade(address newImplementation) internal virtual override { }
+    function _authorizeUpgrade(address newImplementation) internal virtual override onlyOwner { }
 
     /// @notice Sets the minimum mining amount in ORO tokens.
     /// @param newAmount The new minimum mining amount.
-    function setMinAmountOro(uint256 newAmount) external {
+    function setMinAmountOro(uint256 newAmount) external onlyOwner {
         require(newAmount <= maxAmountOro, MinAmountExceedsMaxAmount());
         minAmountOro = newAmount;
     }
 
     /// @notice Sets the maximum mining amount in ORO tokens.
     /// @param newAmount The new maximum mining amount.
-    function setMaxAmountOro(uint256 newAmount) external {
+    function setMaxAmountOro(uint256 newAmount) external onlyOwner {
         require(newAmount >= minAmountOro, MinAmountExceedsMaxAmount());
         maxAmountOro = newAmount;
     }
 
     /// @notice Sets the mining interval.
     /// @param newInterval The new mining interval in seconds.
-    function setMiningInterval(uint256 newInterval) external {
+    function setMiningInterval(uint256 newInterval) external onlyOwner {
         miningInterval = newInterval;
     }
 
     /// @notice Sets the minimum mining reward.
     /// @param newMinReward The new minimum reward.
-    function setMinReward(uint256 newMinReward) external {
+    function setMinReward(uint256 newMinReward) external onlyOwner {
         minReward = newMinReward;
     }
 
     /// @notice Sets the extra reward per level.
     /// @param newExtraRewardPerLevel The new extra reward per level.
-    function setExtraRewardPerLevel(uint256 newExtraRewardPerLevel) external {
+    function setExtraRewardPerLevel(uint256 newExtraRewardPerLevel) external onlyOwner {
         extraRewardPerLevel = newExtraRewardPerLevel;
     }
 
     /// @notice Sets the maximum reward level.
     /// @param newMaxRewardLevel The new maximum reward level.
-    function setMaxRewardLevel(uint256 newMaxRewardLevel) external {
+    function setMaxRewardLevel(uint256 newMaxRewardLevel) external onlyOwner {
         require(newMaxRewardLevel > 0, MaxRewardLevelCannotBeZero());
         maxRewardLevel = newMaxRewardLevel;
     }
 
     /// @notice Sets the referral bonus in basis points.
     /// @param newReferralBonusBps The new referral bonus in bps.
-    function setReferralBonusBps(uint256 newReferralBonusBps) external {
+    function setReferralBonusBps(uint256 newReferralBonusBps) external onlyOwner {
         referralBonusBps = newReferralBonusBps;
     }
 
     /// @notice Deposits ERC20 tokens into the contract. Can only be called by the owner.
     /// @param token The address of the ERC20 token.
     /// @param amount The amount of tokens to deposit.
-    function depositERC20(IERC20 token, uint256 amount) external {
+    function depositERC20(IERC20 token, uint256 amount) external onlyOwner {
         token.safeTransferFrom(msg.sender, address(this), amount);
     }
 
     /// @notice Withdraws ERC20 tokens from the contract. Can only be called by the owner.
     /// @param token The address of the ERC20 token.
     /// @param amount The amount of tokens to withdraw.
-    function withdrawERC20(IERC20 token, uint256 amount) external {
+    function withdrawERC20(IERC20 token, uint256 amount) external onlyOwner {
         token.safeTransfer(owner(), amount);
     }
 
@@ -589,53 +564,5 @@ contract DiamanteMineV1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable
         }
 
         return abi.decode(args, (address, uint256));
-    }
-
-    /*//////////////////////////////////////////////////////////////////////////////
-    //                             TESTING HELPERS
-    //////////////////////////////////////////////////////////////////////////////*/
-
-    function __setDiamante(IERC20 _diamante) public {
-        DIAMANTE = _diamante;
-    }
-
-    function __setOro(IERC20 _oro) public {
-        ORO = _oro;
-    }
-
-    function __setWorldID(IWorldID _worldId) public {
-        WORLD_ID = _worldId;
-    }
-
-    function __disableVerificationUntil(uint256 timestamp) public {
-        verificationDisabledUntil = timestamp;
-    }
-
-    function __disableBalanceCheckUntil(uint256 timestamp) public {
-        balanceCheckDisabledUntil = timestamp;
-    }
-
-    function __setLastMinedAt(uint256 nullifierHash, uint256 timestamp) public {
-        lastMinedAt[nullifierHash] = timestamp;
-    }
-
-    function __setLastRemindedAddress(uint256 nullifierHash, address userAddress) public {
-        lastRemindedAddress[nullifierHash] = userAddress;
-    }
-
-    function __setAddressToNullifierHash(address userAddress, uint256 nullifierHash) public {
-        addressToNullifierHash[userAddress] = nullifierHash;
-    }
-
-    function __setAmountOroMinedWith(uint256 nullifierHash, uint256 amount) public {
-        amountOroMinedWith[nullifierHash] = amount;
-    }
-
-    function __setActiveMiners(uint256 _activeMiners) public {
-        activeMiners = _activeMiners;
-    }
-
-    function __setExternalNullifier(string memory _appId, string memory _actionId) public {
-        EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
     }
 }

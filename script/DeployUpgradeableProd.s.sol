@@ -3,7 +3,7 @@ pragma solidity >=0.8.29 <0.9.0;
 
 import { console } from "forge-std/console.sol";
 import { Script } from "forge-std/Script.sol";
-import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
+import { DiamanteMineV1_1 } from "../src/DiamanteMineV1_1.sol";
 import { IWorldID } from "../src/interfaces/IWorldID.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
@@ -21,8 +21,8 @@ contract DeployUpgradeableProd is Script {
         vm.startBroadcast();
 
         // Deploy implementation
-        DiamanteMineV1 implementation = new DiamanteMineV1(PERMIT2);
-        console.log("DiamanteMineV1 implementation deployed to:", address(implementation));
+        DiamanteMineV1_1 implementation = new DiamanteMineV1_1(PERMIT2);
+        console.log("DiamanteMineV1_1 implementation deployed to:", address(implementation));
 
         // Set deployment parameters
         IWorldID worldId = IWorldID(0x17B354dD2595411ff79041f930e491A4Df39A278);
@@ -37,7 +37,7 @@ contract DeployUpgradeableProd is Script {
 
         // Prepare initialization data
         bytes memory data = abi.encodeWithSelector(
-            DiamanteMineV1.initialize.selector,
+            DiamanteMineV1_1.initialize.selector,
             msg.sender,
             DIAMANTE,
             ORO,
@@ -56,7 +56,7 @@ contract DeployUpgradeableProd is Script {
         // Deploy proxy
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), data);
         proxyAddress = address(proxy);
-        console.log("DiamanteMineV1 proxy deployed to:", proxyAddress);
+        console.log("DiamanteMineV1_1 proxy deployed to:", proxyAddress);
 
         vm.stopBroadcast();
     }

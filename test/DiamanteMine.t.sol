@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 import { Test } from "forge-std/Test.sol";
-import { DiamanteMineV1 } from "../src/DiamanteMineV1.sol";
+import { DiamanteMineV1_1 } from "../src/DiamanteMineV1_1.sol";
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -22,7 +22,7 @@ contract MockERC20 is ERC20 {
 }
 
 contract DiamanteMineTest is Test {
-    DiamanteMineV1 public diamanteMine;
+    DiamanteMineV1_1 public diamanteMine;
     MockERC20 public oroToken;
     MockERC20 public diamanteToken;
     MockWorldID public mockWorldID;
@@ -59,11 +59,11 @@ contract DiamanteMineTest is Test {
         mockPermit2 = new MockPermit2();
 
         // Deploy implementation
-        DiamanteMineV1 implementation = new DiamanteMineV1(mockPermit2);
+        DiamanteMineV1_1 implementation = new DiamanteMineV1_1(mockPermit2);
 
         // Prepare initialization data
         bytes memory data = abi.encodeWithSelector(
-            DiamanteMineV1.initialize.selector,
+            DiamanteMineV1_1.initialize.selector,
             owner, // initialOwner
             diamanteToken,
             oroToken,
@@ -82,7 +82,7 @@ contract DiamanteMineTest is Test {
         // Expect the Initialized event to be emitted with the correct data upon deployment.
         // Since no event fields are indexed, we only check the data payload.
         vm.expectEmit(false, false, false, true);
-        emit DiamanteMineV1.Initialized(
+        emit DiamanteMineV1_1.Initialized(
             owner,
             address(diamanteToken),
             address(oroToken),
@@ -100,7 +100,7 @@ contract DiamanteMineTest is Test {
 
         // Deploy proxy
         ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), data);
-        diamanteMine = DiamanteMineV1(address(proxy));
+        diamanteMine = DiamanteMineV1_1(address(proxy));
 
         // Fund the DiamanteMine contract with Diamante tokens
         diamanteToken.mint(address(diamanteMine), INITIAL_DIAMANTE_SUPPLY);
@@ -154,7 +154,7 @@ contract DiamanteMineTest is Test {
 
         vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
-        emit DiamanteMineV1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
+        emit DiamanteMineV1_1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
         diamanteMine.startMining(args, root, nullifier, proof, permit);
         vm.stopPrank();
 
@@ -173,7 +173,7 @@ contract DiamanteMineTest is Test {
         bytes memory argsLow = diamanteMine.encodeMiningArgs(address(0), tooLow);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DiamanteMineV1.InvalidOroAmount.selector, tooLow, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
+                DiamanteMineV1_1.InvalidOroAmount.selector, tooLow, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
             )
         );
         diamanteMine.startMining(argsLow, root, nullifier, proof, permit);
@@ -182,7 +182,7 @@ contract DiamanteMineTest is Test {
         bytes memory argsHigh = diamanteMine.encodeMiningArgs(address(0), tooHigh);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DiamanteMineV1.InvalidOroAmount.selector, tooHigh, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
+                DiamanteMineV1_1.InvalidOroAmount.selector, tooHigh, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO
             )
         );
         diamanteMine.startMining(argsHigh, root, nullifier, proof, permit);
@@ -211,7 +211,7 @@ contract DiamanteMineTest is Test {
 
         vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
-        emit DiamanteMineV1.FinishedMining(
+        emit DiamanteMineV1_1.FinishedMining(
             user1,
             address(0),
             userNullifier,
@@ -269,7 +269,7 @@ contract DiamanteMineTest is Test {
         // Prank must be immediately before the state-changing call
         vm.prank(firstMiner);
         vm.expectEmit(true, true, true, true);
-        emit DiamanteMineV1.FinishedMining(
+        emit DiamanteMineV1_1.FinishedMining(
             firstMiner,
             address(0),
             firstMinerNullifier,
@@ -292,7 +292,7 @@ contract DiamanteMineTest is Test {
         bytes memory args = diamanteMine.encodeMiningArgs(address(0), MIN_AMOUNT_IN_ORO);
 
         vm.startPrank(user1);
-        vm.expectRevert(DiamanteMineV1.AlreadyMining.selector);
+        vm.expectRevert(DiamanteMineV1_1.AlreadyMining.selector);
         diamanteMine.startMining(args, root, nullifier, proof, permit);
         vm.stopPrank();
     }
@@ -319,14 +319,14 @@ contract DiamanteMineTest is Test {
         bytes memory args2 = diamanteMine.encodeMiningArgs(address(0), MIN_AMOUNT_IN_ORO);
 
         vm.startPrank(user2);
-        vm.expectRevert(DiamanteMineV1.InsufficientBalanceForReward.selector);
+        vm.expectRevert(DiamanteMineV1_1.InsufficientBalanceForReward.selector);
         diamanteMine.startMining(args2, root2, nullifier2, proof2, permit);
         vm.stopPrank();
     }
 
     function test_Fail_FinishMining_NotStarted() public {
         vm.prank(user1);
-        vm.expectRevert(DiamanteMineV1.MiningNotStarted.selector);
+        vm.expectRevert(DiamanteMineV1_1.MiningNotStarted.selector);
         diamanteMine.finishMining();
     }
 
@@ -339,7 +339,7 @@ contract DiamanteMineTest is Test {
 
         // 3. User1 tries to finish mining
         vm.startPrank(user1);
-        vm.expectRevert(DiamanteMineV1.MiningIntervalNotElapsed.selector);
+        vm.expectRevert(DiamanteMineV1_1.MiningIntervalNotElapsed.selector);
         diamanteMine.finishMining();
         vm.stopPrank();
     }
@@ -826,7 +826,7 @@ contract DiamanteMineTest is Test {
         // --- Fail: Min > Max ---
         vm.prank(owner);
         uint256 invalidAmount = MAX_AMOUNT_IN_ORO + 1;
-        vm.expectRevert(DiamanteMineV1.MinAmountExceedsMaxAmount.selector);
+        vm.expectRevert(DiamanteMineV1_1.MinAmountExceedsMaxAmount.selector);
         diamanteMine.setMinAmountOro(invalidAmount);
     }
 
@@ -846,7 +846,7 @@ contract DiamanteMineTest is Test {
         // --- Fail: Max < Min ---
         vm.prank(owner);
         uint256 invalidAmount = MIN_AMOUNT_IN_ORO - 1;
-        vm.expectRevert(DiamanteMineV1.MinAmountExceedsMaxAmount.selector);
+        vm.expectRevert(DiamanteMineV1_1.MinAmountExceedsMaxAmount.selector);
         diamanteMine.setMaxAmountOro(invalidAmount);
     }
 
@@ -907,7 +907,7 @@ contract DiamanteMineTest is Test {
 
         // --- Fail: Zero Value ---
         vm.prank(owner);
-        vm.expectRevert(DiamanteMineV1.MaxRewardLevelCannotBeZero.selector);
+        vm.expectRevert(DiamanteMineV1_1.MaxRewardLevelCannotBeZero.selector);
         diamanteMine.setMaxRewardLevel(0);
     }
 
@@ -996,23 +996,23 @@ contract DiamanteMineTest is Test {
 
     function test_GetUserMiningState() public {
         // 1. Initially, user1 is not mining
-        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.NotMining));
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1_1.MiningState.NotMining));
 
         // 2. User1 starts mining
         _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
 
         // 3. Now, user1 is mining
-        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.Mining));
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1_1.MiningState.Mining));
 
         // 4. Time passes, user1 is ready to finish
         vm.warp(block.timestamp + diamanteMine.miningInterval());
-        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.ReadyToFinish));
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1_1.MiningState.ReadyToFinish));
 
         // 5. User1 finishes mining
         _finishMiningAs(user1);
 
         // 6. Finally, user1 is not mining again
-        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1.MiningState.NotMining));
+        assertEq(uint256(diamanteMine.getUserMiningState(user1)), uint256(DiamanteMineV1_1.MiningState.NotMining));
     }
 
     //-//////////////////////////////////////////////////////////////////////////
@@ -1078,7 +1078,7 @@ contract DiamanteMineTest is Test {
         bytes memory args = diamanteMine.encodeMiningArgs(user1, MIN_AMOUNT_IN_ORO);
 
         vm.startPrank(user1);
-        vm.expectRevert(DiamanteMineV1.CannotRemindSelf.selector);
+        vm.expectRevert(DiamanteMineV1_1.CannotRemindSelf.selector);
         diamanteMine.startMining(args, root, nullifier, proof, permit);
         vm.stopPrank();
     }
@@ -1655,7 +1655,7 @@ contract DiamanteMineTest is Test {
 
         vm.startPrank(user1);
         vm.expectEmit(true, true, true, true);
-        emit DiamanteMineV1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
+        emit DiamanteMineV1_1.StartedMining(user1, user2, nullifier, MIN_AMOUNT_IN_ORO);
         diamanteMine.startMining(args, root, nullifier, proof, permit);
         vm.stopPrank();
 
@@ -1672,7 +1672,7 @@ contract DiamanteMineTest is Test {
 
         // Amount will be decoded as 0, which is less than minAmountOro
         vm.expectRevert(
-            abi.encodeWithSelector(DiamanteMineV1.InvalidOroAmount.selector, 0, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO)
+            abi.encodeWithSelector(DiamanteMineV1_1.InvalidOroAmount.selector, 0, MIN_AMOUNT_IN_ORO, MAX_AMOUNT_IN_ORO)
         );
         diamanteMine.startMining(emptyData, root, nullifier, proof, permit);
     }
