@@ -5,16 +5,16 @@ pragma solidity ^0.8.30;
 
 import { Script } from "forge-std/Script.sol";
 import { console } from "forge-std/console.sol";
-import { DiamanteMineV1_1 } from "../src/DiamanteMineV1_1.sol";
-import { DiamanteMineV1_1Dev } from "../src/DiamanteMineV1_1.dev.sol";
+import { DiamanteMineV1_2 } from "../src/DiamanteMineV1_2.sol";
+import { DiamanteMineV1_2Dev } from "../src/DiamanteMineV1_2.dev.sol";
 import { ByteHasher } from "../src/utils/ByteHasher.sol";
 import { DeploymentConfig, StateType, Config, DevState, ProdState, StagingState } from "./config/DeploymentConfig.sol";
 
 contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
 
-    DiamanteMineV1_1 public prodImplementation = DiamanteMineV1_1(0x0b2FE6e893c1344B9fB1B5E3ed6559E4D543e1cd);
-    DiamanteMineV1_1Dev public devImplementation;
+    DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0x0b2FE6e893c1344B9fB1B5E3ed6559E4D543e1cd);
+    DiamanteMineV1_2Dev public devImplementation;
 
     function run() external {
         Config[] memory configs = DeploymentConfig.getConfigs();
@@ -29,13 +29,13 @@ contract ValidateDeploysScript is Script {
 
         // 1. Deploy the implementation contracts.
         if (address(prodImplementation) == address(0)) {
-            prodImplementation = new DiamanteMineV1_1(DeploymentConfig.PERMIT2);
-            console.log("New DiamanteMineV1_1 implementation deployed to:", address(prodImplementation));
+            prodImplementation = new DiamanteMineV1_2(DeploymentConfig.PERMIT2);
+            console.log("New DiamanteMineV1_2 implementation deployed to:", address(prodImplementation));
         }
 
         if (address(devImplementation) == address(0)) {
-            devImplementation = new DiamanteMineV1_1Dev(DeploymentConfig.PERMIT2);
-            console.log("New DiamanteMineV1_1Dev implementation deployed to:", address(devImplementation));
+            devImplementation = new DiamanteMineV1_2Dev(DeploymentConfig.PERMIT2);
+            console.log("New DiamanteMineV1_2Dev implementation deployed to:", address(devImplementation));
         }
 
         // 2. Upgrade each proxy to the appropriate implementation.
@@ -53,7 +53,7 @@ contract ValidateDeploysScript is Script {
                 abi.encodePacked(abi.encodePacked(bytes(config.appId)).hashToField(), config.actionId).hashToField();
 
             if (isProduction) {
-                DiamanteMineV1_1 proxy = DiamanteMineV1_1(proxyAddress);
+                DiamanteMineV1_2 proxy = DiamanteMineV1_2(proxyAddress);
                 uint256 proxyExternalNullifier = proxy.EXTERNAL_NULLIFIER();
 
                 if (proxyExternalNullifier != expectedExternalNullifier) {
@@ -70,7 +70,7 @@ contract ValidateDeploysScript is Script {
                 // Validate production configuration
                 _validateProdState(proxy, config.label);
             } else {
-                DiamanteMineV1_1Dev proxy = DiamanteMineV1_1Dev(proxyAddress);
+                DiamanteMineV1_2Dev proxy = DiamanteMineV1_2Dev(proxyAddress);
                 uint256 proxyExternalNullifier = proxy.EXTERNAL_NULLIFIER();
 
                 if (proxyExternalNullifier != expectedExternalNullifier) {
@@ -106,9 +106,9 @@ contract ValidateDeploysScript is Script {
 
             console.log("Upgrading proxy '%s'...", config.label);
             if (isProduction) {
-                DiamanteMineV1_1(proxyAddress).upgradeToAndCall(targetImplementation, "");
+                DiamanteMineV1_2(proxyAddress).upgradeToAndCall(targetImplementation, "");
             } else {
-                DiamanteMineV1_1Dev(proxyAddress).upgradeToAndCall(targetImplementation, "");
+                DiamanteMineV1_2Dev(proxyAddress).upgradeToAndCall(targetImplementation, "");
             }
 
             upgradedCount++;
@@ -124,7 +124,7 @@ contract ValidateDeploysScript is Script {
         vm.stopBroadcast();
     }
 
-    function _validateDevState(DiamanteMineV1_1Dev proxy, string memory label) internal view {
+    function _validateDevState(DiamanteMineV1_2Dev proxy, string memory label) internal view {
         console.log("Validating dev configuration for '%s':", label);
 
         DevState memory devState = DeploymentConfig.getDevState();
@@ -148,7 +148,7 @@ contract ValidateDeploysScript is Script {
         console.log("-> Token addresses are correct for proxy '%s'", label);
     }
 
-    function _validateProdState(DiamanteMineV1_1 proxy, string memory label) internal view {
+    function _validateProdState(DiamanteMineV1_2 proxy, string memory label) internal view {
         console.log("Validating production configuration for '%s':", label);
 
         ProdState memory prodState = DeploymentConfig.getProdState();
@@ -178,7 +178,7 @@ contract ValidateDeploysScript is Script {
         console.log("-> Token addresses are correct for proxy '%s'", label);
     }
 
-    function _validateStagingState(DiamanteMineV1_1Dev proxy, string memory label) internal view {
+    function _validateStagingState(DiamanteMineV1_2Dev proxy, string memory label) internal view {
         console.log("Validating staging configuration for '%s':", label);
 
         StagingState memory stagingState = DeploymentConfig.getStagingState();
