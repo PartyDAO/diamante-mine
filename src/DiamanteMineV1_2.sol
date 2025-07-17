@@ -366,7 +366,6 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
 
     /// @notice Calculates the required DIAMANTE balance to cover all potential mining rewards.
     /// @dev This function is helpful for external alerting tools to notify when balance needs topping off.
-    ///      Applies a configurable safe limit percentage to avoid over-reserving capital.
     /// @param totalActiveOroMining The total amount of ORO currently being mined.
     /// @return requiredBalance The estimated DIAMANTE balance needed based on safe limit.
     function calculateRequiredBalance(uint256 totalActiveOroMining) public view returns (uint256 requiredBalance) {
