@@ -80,6 +80,7 @@ contract DiamanteMineV1_2 is DiamanteMineV1_1 {
         );
 
         activeMiners++;
+        activeOroMining += amount;
 
         lastMinedAt[nullifierHash] = block.timestamp;
         amountOroMinedWith[nullifierHash] = amount;
@@ -144,6 +145,9 @@ contract DiamanteMineV1_2 is DiamanteMineV1_1 {
         uint256 totalReward = multipliedReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
+
+        if (activeOroMining >= amountMined) activeOroMining -= amountMined;
+        else activeOroMining = 0;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
