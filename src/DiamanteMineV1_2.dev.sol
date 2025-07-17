@@ -10,7 +10,7 @@ import { ByteHasher } from "./utils/ByteHasher.sol";
 import { IWorldID } from "./interfaces/IWorldID.sol";
 import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helper.sol";
 
-// NOTE: Modified DiamanteMineV1_1.sol (v1.1.0) for testing with following changes:
+// NOTE: Modified DiamanteMineV1_2.sol for testing with following changes:
 // - All functions are public for ease of testing (no access control)
 // - Added helper utils for testing:
 //   - `__setDiamante()`
@@ -25,7 +25,7 @@ import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helpe
 //   - `__setActiveMiners()`
 //   - `__setExternalNullifier()`
 
-contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
+contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
 
@@ -128,6 +128,10 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
     uint256 private constant MAX_BPS = 10_000;
 
+    /// @notice The safe limit percentage in basis points to apply to required balance calculations.
+    /// @dev This allows for a more conservative estimate than worst-case scenario.
+    uint256 private constant SAFE_LIMIT_PERCENTAGE_BPS = 6500; // 65%
+
     /// @notice The DIAMANTE token contract. This is the reward token.
     IERC20 public DIAMANTE;
     /// @notice The ORO token contract. This token is used to pay the mining fee.
@@ -169,6 +173,9 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     // Testing helpers
     uint256 public verificationDisabledUntil;
     uint256 public balanceCheckDisabledUntil;
+
+    /// @notice The total amount of ORO all active users are currently mining with.
+    uint256 public activeOroMining;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ISignatureTransfer _permit2) Permit2Helper(_permit2) {
@@ -376,6 +383,30 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         return calculateRewardRangeForAmount(oroAmount);
     }
 
+    /// @notice Calculates the required DIAMANTE balance to cover all potential mining rewards.
+    /// @dev This function is helpful for external alerting tools to notify when balance needs topping off.
+    ///      Applies a configurable safe limit percentage to avoid over-reserving capital.
+    /// @param totalActiveOroMining The total amount of ORO currently being mined.
+    /// @return requiredBalance The estimated DIAMANTE balance needed based on safe limit.
+    function calculateRequiredBalance(uint256 totalActiveOroMining) public view returns (uint256 requiredBalance) {
+        if (totalActiveOroMining == 0) {
+            return 0;
+        }
+
+        // Get the maximum possible reward for the active ORO amount
+        (, uint256 maxPossibleReward) = calculateRewardRangeForAmount(totalActiveOroMining);
+
+        // Factor in potential referral bonuses assuming 10% of users earn referral bonus
+        // maxPossibleRewardWithBonus = maxPossibleReward * (1 + 0.1 * referralBonus%)
+        uint256 maxPossibleRewardWithBonus = (maxPossibleReward * (MAX_BPS + (referralBonusBps / 10))) / MAX_BPS;
+
+        // Apply safe limit percentage to avoid over-reserving capital
+        // requiredBalance = maxPossibleRewardWithBonus * safeLimitPercentage
+        requiredBalance = (maxPossibleRewardWithBonus * SAFE_LIMIT_PERCENTAGE_BPS) / MAX_BPS;
+
+        return requiredBalance;
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                     CORE
     //////////////////////////////////////////////////////////////////////////////*/
@@ -395,18 +426,20 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         Permit2 memory permit
     )
         external
+        virtual
     {
         // Decode mining arguments
         (address userToRemind, uint256 amount) = _decodeMiningArgs(args);
 
-        if (lastMinedAt[nullifierHash] != 0) revert AlreadyMining();
-        if (amount < minAmountOro || amount > maxAmountOro) {
-            revert InvalidOroAmount(amount, minAmountOro, maxAmountOro);
-        }
+        require(userToRemind != msg.sender, CannotRemindSelf());
+
+        require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
+        require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
         if (block.timestamp >= balanceCheckDisabledUntil) {
-            if (DIAMANTE.balanceOf(address(this)) < maxReward() * (activeMiners + 1)) {
-                revert InsufficientBalanceForReward();
-            }
+            require(
+                DIAMANTE.balanceOf(address(this)) >= calculateRequiredBalance(activeOroMining + amount),
+                InsufficientBalanceForReward()
+            );
         }
 
         // Verify proof of personhood before any state changes
@@ -417,6 +450,7 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         }
 
         activeMiners++;
+        activeOroMining += amount;
 
         lastMinedAt[nullifierHash] = block.timestamp;
         amountOroMinedWith[nullifierHash] = amount;
@@ -449,6 +483,7 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
         external
+        virtual
         returns (uint256 multipliedReward, uint256 referralBonusAmount, bool hasReferralBonus)
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
@@ -480,6 +515,9 @@ contract DiamanteMineV1_1Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         uint256 totalReward = multipliedReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
+
+        if (activeOroMining >= amountMined) activeOroMining -= amountMined;
+        else activeOroMining = 0;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
