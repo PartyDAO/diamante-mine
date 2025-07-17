@@ -151,6 +151,9 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
     /// @notice The number of users currently mining.
     uint256 public activeMiners;
 
+    /// @notice The amount of ORO currently mining.
+    uint256 public activeOroMining;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ISignatureTransfer _permit2) Permit2Helper(_permit2) {
         _disableInitializers();
@@ -384,7 +387,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
 
         require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
         require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
-        require(DIAMANTE.balanceOf(address(this)) >= maxReward() * (activeMiners + 1), InsufficientBalanceForReward());
+        require(DIAMANTE.balanceOf(address(this)) >= calculateRewardRangeForAmount(1).maxTotalReward * (activeOroMining + 1), InsufficientBalanceForReward());
 
         // Verify proof of personhood before any state changes
         WORLD_ID.verifyProof(
@@ -392,6 +395,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         );
 
         activeMiners++;
+        activeOroMining += amount;
 
         lastMinedAt[nullifierHash] = block.timestamp;
         amountOroMinedWith[nullifierHash] = amount;
@@ -455,6 +459,7 @@ contract DiamanteMineV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, P
         uint256 totalReward = multipliedReward + referralBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
+        if (activeOroMining >= amountMined) activeOroMining -= amountMined else activeOroMining = 0;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
