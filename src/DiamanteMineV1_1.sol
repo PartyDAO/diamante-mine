@@ -376,6 +376,7 @@ contract DiamanteMineV1_1 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         Permit2 memory permit
     )
         external
+        virtual
     {
         // Decode mining arguments
         (address userToRemind, uint256 amount) = _decodeMiningArgs(args);
@@ -424,6 +425,7 @@ contract DiamanteMineV1_1 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
         external
+        virtual
         returns (uint256 multipliedReward, uint256 referralBonusAmount, bool hasReferralBonus)
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
