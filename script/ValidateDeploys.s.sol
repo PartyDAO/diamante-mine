@@ -13,8 +13,8 @@ import { DeploymentConfig, StateType, Config, DevState, ProdState, StagingState 
 contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
 
-    DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0x0b2FE6e893c1344B9fB1B5E3ed6559E4D543e1cd);
-    DiamanteMineV1_2Dev public devImplementation;
+    DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0xf7F4146649210E61730E1232be8bE417a2E24419);
+    DiamanteMineV1_2Dev public devImplementation = DiamanteMineV1_2Dev(0x230b383A90577A2945Ca9C01A5a9e7DAC7641172);
 
     function run() external {
         Config[] memory configs = DeploymentConfig.getConfigs();
