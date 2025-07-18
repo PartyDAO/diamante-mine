@@ -570,12 +570,6 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         referralBonusBps = newReferralBonusBps;
     }
 
-    /// @notice Sets the amount of ORO actively mining.
-    /// @param newActiveOroMining The new amount of ORO actively mining.
-    function setActiveOroMining(uint256 newActiveOroMining) external onlyOwner {
-        activeOroMining = newActiveOroMining;
-    }
-
     /// @notice Deposits ERC20 tokens into the contract. Can only be called by the owner.
     /// @param token The address of the ERC20 token.
     /// @param amount The amount of tokens to deposit.
