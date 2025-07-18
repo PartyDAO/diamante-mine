@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import { DiamanteMineV1_1 } from "../../src/DiamanteMineV1_1.sol";
+import { DiamanteMineV1_2 } from "../../src/DiamanteMineV1_2.sol";
 import { ISignatureTransfer } from "@uniswap/permit2/src/interfaces/ISignatureTransfer.sol";
 
-contract MockDiamanteMineV2 is DiamanteMineV1_1 {
+contract MockDiamanteMineV2 is DiamanteMineV1_2 {
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(ISignatureTransfer _permit2) DiamanteMineV1_1(_permit2) {
+    constructor(ISignatureTransfer _permit2) DiamanteMineV1_2(_permit2) {
         _disableInitializers();
     }
 
