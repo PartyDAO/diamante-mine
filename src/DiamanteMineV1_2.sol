@@ -360,8 +360,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         minTotalReward = (minBaseRewardAmount * oroAmount) / 1e18;
 
         // Calculate maximum reward (when at maximum reward level)
-        uint256 maxBaseRewardAmount = minReward + (extraRewardPerLevel * maxRewardLevel);
-        maxTotalReward = (maxBaseRewardAmount * oroAmount) / 1e18;
+        maxTotalReward = (maxBaseReward() * oroAmount) / 1e18;
     }
 
     /// @notice Calculates the potential reward range for a user's current mining session.
@@ -389,7 +388,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         }
 
         // Calculate the maximum possible reward for the active ORO amount.
-        uint256 maxPossibleReward = ((minReward + (extraRewardPerLevel * maxRewardLevel)) * totalActiveOroMining) / 1e18;
+        uint256 maxPossibleReward = (maxBaseReward() * totalActiveOroMining) / 1e18;
 
         // Factor in potential referral bonuses assuming 10% of users earn referral bonus
         // maxPossibleRewardWithBonus = maxPossibleReward * (1 + 0.1 * referralBonus%)
