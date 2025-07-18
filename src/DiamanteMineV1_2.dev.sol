@@ -365,8 +365,7 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         minTotalReward = (minBaseRewardAmount * oroAmount) / 1e18;
 
         // Calculate maximum reward (when at maximum reward level)
-        uint256 maxBaseRewardAmount = minReward + (extraRewardPerLevel * maxRewardLevel);
-        maxTotalReward = (maxBaseRewardAmount * oroAmount) / 1e18;
+        maxTotalReward = (maxBaseReward() * oroAmount) / 1e18;
     }
 
     /// @notice Calculates the potential reward range for a user's current mining session.
@@ -386,7 +385,6 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
     /// @notice Calculates the required DIAMANTE balance to cover all potential mining rewards.
     /// @dev This function is helpful for external alerting tools to notify when balance needs topping off.
-    ///      Applies a configurable safe limit percentage to avoid over-reserving capital.
     /// @param totalActiveOroMining The total amount of ORO currently being mined.
     /// @return requiredBalance The estimated DIAMANTE balance needed based on safe limit.
     function calculateRequiredBalance(uint256 totalActiveOroMining) public view returns (uint256 requiredBalance) {
@@ -394,8 +392,10 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
             return 0;
         }
 
-        // Get the maximum possible reward for the active ORO amount
-        (, uint256 maxPossibleReward) = calculateRewardRangeForAmount(totalActiveOroMining);
+        // Calculate the maximum possible reward for the active ORO amount directly.
+        // We don't use calculateRewardRangeForAmount here because it validates against maxAmountOro,
+        // which applies to individual users, not the total active mining amount.
+        uint256 maxPossibleReward = (maxBaseReward() * totalActiveOroMining) / 1e18;
 
         // Factor in potential referral bonuses assuming 10% of users earn referral bonus
         // maxPossibleRewardWithBonus = maxPossibleReward * (1 + 0.1 * referralBonus%)
