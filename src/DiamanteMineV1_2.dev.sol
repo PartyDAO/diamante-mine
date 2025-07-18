@@ -262,7 +262,7 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /// @notice Returns the contract version.
     /// @return The contract version string.
     function VERSION() external pure virtual returns (string memory) {
-        return "1.2.0";
+        return "1.2.1";
     }
 
     /// @notice Calculates the maximum possible bonus reward.

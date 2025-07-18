@@ -969,7 +969,7 @@ contract DiamanteMineTest is Test {
 
     function test_UpgradeToV2() public {
         // Check initial version
-        assertEq(diamanteMine.VERSION(), "1.2.0");
+        assertEq(diamanteMine.VERSION(), "1.2.1");
 
         // Set some state in V1
         vm.prank(owner);
