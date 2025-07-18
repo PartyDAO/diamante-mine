@@ -80,9 +80,16 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         string actionId
     );
 
+    /// @notice Emitted when the contract is migrated to V1.2.
+    // solhint-disable-next-line event-name-capwords
+    event MigratedToV1_2(uint256 activeOroMining);
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    ERRORS
     //////////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice Thrown when the contract is already initialized.
+    error AlreadyMigratedToV1_2();
 
     /// @notice Thrown when a user tries to finish mining before the mining interval has elapsed.
     error MiningIntervalNotElapsed();
@@ -210,8 +217,6 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         DIAMANTE = _diamante;
         ORO = _oro;
 
-        activeOroMining = activeMiners * 1e18;
-
         minAmountOro = _minAmountOro;
         maxAmountOro = _maxAmountOro;
         minReward = _minReward;
@@ -238,6 +243,13 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         );
     }
 
+    /// @notice Migrates the contract from V1.1 to V1.2.
+    function migrateToV1_2() external onlyOwner {
+        require(activeOroMining == 0, AlreadyMigratedToV1_2());
+        activeOroMining = activeMiners * 1e18;
+        emit MigratedToV1_2(activeOroMining);
+    }
+
     /*//////////////////////////////////////////////////////////////////////////////
     //                                    VIEW
     //////////////////////////////////////////////////////////////////////////////*/
@@ -245,7 +257,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice Returns the contract version.
     /// @return The contract version string.
     function VERSION() external pure virtual returns (string memory) {
-        return "1.1.0";
+        return "1.2.0";
     }
 
     /// @notice Calculates the maximum possible bonus reward.
