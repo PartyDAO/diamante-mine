@@ -969,7 +969,7 @@ contract DiamanteMineTest is Test {
 
     function test_UpgradeToV2() public {
         // Check initial version
-        assertEq(diamanteMine.VERSION(), "1.1.0");
+        assertEq(diamanteMine.VERSION(), "1.2.0");
 
         // Set some state in V1
         vm.prank(owner);
@@ -1124,6 +1124,169 @@ contract DiamanteMineTest is Test {
 
         assertTrue(hasReferralBonus, "Should have received a referral bonus");
         assertEq(rewardReceived, expectedTotal, "Should receive mining reward * 3 ORO + referral bonus");
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- CALCULATE REQUIRED BALANCE TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_CalculateRequiredBalance_BasicFunctionality() public view {
+        // Test basic functionality with valid ORO amounts
+        uint256 totalActiveOro = 50 * 1e18; // 50 ORO total
+
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(totalActiveOro);
+
+        // Calculate expected values manually
+        uint256 maxBaseReward =
+            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
+        uint256 maxPossibleReward = (maxBaseReward * totalActiveOro) / 1e18;
+        uint256 maxPossibleRewardWithBonus =
+            (maxPossibleReward * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
+        uint256 expectedRequiredBalance = (maxPossibleRewardWithBonus * 6500) / 10_000; // SAFE_LIMIT_PERCENTAGE_BPS
+
+        assertEq(requiredBalance, expectedRequiredBalance, "Required balance should match expected calculation");
+        assertTrue(requiredBalance > 0, "Required balance should be greater than 0 for active mining");
+    }
+
+    function test_CalculateRequiredBalance_ZeroActiveOro() public view {
+        // Test with zero active ORO mining
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(0);
+        assertEq(requiredBalance, 0, "Required balance should be 0 when no active mining");
+    }
+
+    function test_CalculateRequiredBalance_ExceedsMaxAmountOro() public view {
+        // This test verifies the fix for the bug where calculateRequiredBalance returned 0
+        // when totalActiveOroMining exceeded maxAmountOro
+
+        uint256 maxAmountOro = diamanteMine.maxAmountOro(); // 100 ORO
+        uint256 totalActiveOro = maxAmountOro * 5; // 500 ORO total (exceeds individual max)
+
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(totalActiveOro);
+
+        // Should NOT return 0 (this was the bug)
+        assertTrue(requiredBalance > 0, "Required balance should be > 0 even when total exceeds maxAmountOro");
+
+        // Verify it scales properly with the total amount
+        uint256 requiredBalanceForMax = diamanteMine.calculateRequiredBalance(maxAmountOro);
+        assertTrue(requiredBalance > requiredBalanceForMax, "Required balance should scale with total active ORO");
+
+        // Should be approximately 5x since we have 5x the ORO
+        uint256 expectedRatio = requiredBalance * 100 / requiredBalanceForMax; // Convert to percentage
+        assertTrue(expectedRatio >= 450 && expectedRatio <= 550, "Should be approximately 5x (450-550%)");
+    }
+
+    function test_CalculateRequiredBalance_LinearScaling() public view {
+        // Test that required balance scales linearly with total active ORO
+        uint256 baseAmount = 20 * 1e18;
+        uint256 doubleAmount = 40 * 1e18;
+        uint256 tripleAmount = 60 * 1e18;
+
+        uint256 requiredBalance1 = diamanteMine.calculateRequiredBalance(baseAmount);
+        uint256 requiredBalance2 = diamanteMine.calculateRequiredBalance(doubleAmount);
+        uint256 requiredBalance3 = diamanteMine.calculateRequiredBalance(tripleAmount);
+
+        // Verify linear scaling
+        assertEq(requiredBalance2, requiredBalance1 * 2, "Required balance should scale linearly (2x)");
+        assertEq(requiredBalance3, requiredBalance1 * 3, "Required balance should scale linearly (3x)");
+    }
+
+    function test_CalculateRequiredBalance_LargeAmounts() public view {
+        // Test with very large amounts that would definitely exceed maxAmountOro
+        uint256 veryLargeAmount = 10_000 * 1e18; // 10,000 ORO (100x the max individual amount)
+
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(veryLargeAmount);
+
+        assertTrue(requiredBalance > 0, "Should handle very large amounts without returning 0");
+
+        // Should be significantly larger than max individual amount calculation
+        uint256 maxIndividualRequired = diamanteMine.calculateRequiredBalance(diamanteMine.maxAmountOro());
+        assertTrue(requiredBalance > maxIndividualRequired * 50, "Should be much larger for very large amounts");
+    }
+
+    function test_CalculateRequiredBalance_WithParameterChanges() public {
+        uint256 totalActiveOro = 200 * 1e18;
+
+        // Get initial required balance
+        uint256 initialRequired = diamanteMine.calculateRequiredBalance(totalActiveOro);
+
+        // Change minReward and verify required balance updates
+        vm.startPrank(owner);
+        uint256 oldMinReward = diamanteMine.minReward();
+        diamanteMine.setMinReward(oldMinReward * 2);
+        vm.stopPrank();
+
+        uint256 newRequired = diamanteMine.calculateRequiredBalance(totalActiveOro);
+        assertTrue(newRequired > initialRequired, "Required balance should increase when rewards increase");
+
+        // Reset and test extraRewardPerLevel change
+        vm.startPrank(owner);
+        diamanteMine.setMinReward(oldMinReward);
+        uint256 oldExtraReward = diamanteMine.extraRewardPerLevel();
+        diamanteMine.setExtraRewardPerLevel(oldExtraReward * 2);
+        vm.stopPrank();
+
+        uint256 newRequired2 = diamanteMine.calculateRequiredBalance(totalActiveOro);
+        assertTrue(
+            newRequired2 > initialRequired, "Required balance should increase when extraRewardPerLevel increases"
+        );
+    }
+
+    function test_CalculateRequiredBalance_CompareWithOldImplementation() public view {
+        // Test that demonstrates the old bug and verifies the fix
+        uint256 totalActiveOro = diamanteMine.maxAmountOro() + 1; // Just over the individual max
+
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(totalActiveOro);
+
+        // With the old implementation, this would return 0 because:
+        // calculateRewardRangeForAmount(totalActiveOro) would return (0, 0)
+        // since totalActiveOro > maxAmountOro
+
+        // With the fix, it should return a proper value
+        assertTrue(requiredBalance > 0, "Fixed implementation should not return 0");
+
+        // Verify it's using maxBaseReward calculation directly
+        uint256 maxBaseReward =
+            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
+        uint256 expectedMaxReward = (maxBaseReward * totalActiveOro) / 1e18;
+        uint256 expectedWithBonus = (expectedMaxReward * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
+        uint256 expectedRequired = (expectedWithBonus * 6500) / 10_000;
+
+        assertEq(requiredBalance, expectedRequired, "Should calculate required balance correctly using maxBaseReward");
+    }
+
+    function test_CalculateRequiredBalance_RealisticScenario() public {
+        // Test with a realistic scenario where many users are mining
+        uint256 numMiners = 100;
+        uint256 averageOroPerMiner = 10 * 1e18; // 10 ORO each
+        uint256 totalActiveOro = numMiners * averageOroPerMiner; // 1,000 ORO total
+
+        uint256 requiredBalance = diamanteMine.calculateRequiredBalance(totalActiveOro);
+
+        assertTrue(requiredBalance > 0, "Should handle realistic mining scenarios");
+
+        // Should be reasonable compared to the total ORO value
+        // The required balance should be less than the total ORO value in most cases
+        // since rewards are typically a fraction of the staked amount
+        assertTrue(
+            requiredBalance < totalActiveOro * 2, "Required balance should be reasonable relative to staked amount"
+        );
+    }
+
+    function test_CalculateRequiredBalance_EdgeCases() public view {
+        // Test edge cases
+
+        // Test with 1 ether (1 wei might result in 0 due to integer division)
+        uint256 requiredBalance1 = diamanteMine.calculateRequiredBalance(1 * 1e18);
+        assertTrue(requiredBalance1 > 0, "Should handle 1 ether");
+
+        // Test with exactly maxAmountOro (should work fine)
+        uint256 requiredBalance2 = diamanteMine.calculateRequiredBalance(diamanteMine.maxAmountOro());
+        assertTrue(requiredBalance2 > 0, "Should handle exactly maxAmountOro");
+
+        // Test with maxAmountOro + 1 (this was the problematic case)
+        uint256 requiredBalance3 = diamanteMine.calculateRequiredBalance(diamanteMine.maxAmountOro() + 1);
+        assertTrue(requiredBalance3 > 0, "Should handle maxAmountOro + 1");
+        assertTrue(requiredBalance3 >= requiredBalance2, "Should be at least as high for larger amount");
     }
 
     //-//////////////////////////////////////////////////////////////////////////
