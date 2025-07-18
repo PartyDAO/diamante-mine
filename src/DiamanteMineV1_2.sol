@@ -10,6 +10,7 @@ import { ByteHasher } from "./utils/ByteHasher.sol";
 import { IWorldID } from "./interfaces/IWorldID.sol";
 import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helper.sol";
 
+// solhint-disable-next-line contract-name-capwords
 contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
@@ -208,6 +209,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         EXTERNAL_NULLIFIER = abi.encodePacked(abi.encodePacked(_appId).hashToField(), _actionId).hashToField();
         DIAMANTE = _diamante;
         ORO = _oro;
+
+        activeOroMining = activeMiners * 1e18;
 
         minAmountOro = _minAmountOro;
         maxAmountOro = _maxAmountOro;

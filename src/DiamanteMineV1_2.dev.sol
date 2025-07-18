@@ -25,6 +25,7 @@ import { Permit2Helper, Permit2, ISignatureTransfer } from "./utils/Permit2Helpe
 //   - `__setActiveMiners()`
 //   - `__setExternalNullifier()`
 
+// solhint-disable-next-line contract-name-capwords
 contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeable, Permit2Helper {
     using ByteHasher for bytes;
     using SafeERC20 for IERC20;
