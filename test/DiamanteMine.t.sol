@@ -33,16 +33,17 @@ contract DiamanteMineTest is Test {
     address public owner = makeAddr("owner");
     address public user3 = makeAddr("user3");
 
-    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000 * 1e18; // Much larger supply for
-        // new multiplication
-        // system
-    uint256 public constant MIN_AMOUNT_IN_ORO = 1 * 1e18;
-    uint256 public constant MAX_AMOUNT_IN_ORO = 100 * 1e18;
-    uint256 public constant MIN_REWARD = 0.1 * 1e18;
-    uint256 public constant EXTRA_REWARD_PER_LEVEL = 0.09 * 1e18;
+    // Much larger supply for new multiplication system
+    uint256 public constant INITIAL_DIAMANTE_SUPPLY = 100_000_000e18;
+    uint256 public constant MIN_AMOUNT_IN_ORO = 1e18;
+    uint256 public constant MAX_AMOUNT_IN_ORO = 100e18;
+    uint256 public constant MIN_REWARD = 0.1e18;
+    uint256 public constant EXTRA_REWARD_PER_LEVEL = 0.09e18;
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
     uint256 public constant MINING_INTERVAL = 24 hours;
     uint256 public constant MAX_REWARD_LEVEL = 10;
+    uint256 public constant STREAK_BONUS = 0.05e18; // Flat 0.05 bonus
+    uint256 public constant STREAK_WINDOW = 48 hours;
 
     Permit2 public permit;
 
@@ -74,6 +75,8 @@ contract DiamanteMineTest is Test {
             MAX_REWARD_LEVEL,
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
+            STREAK_WINDOW,
+            STREAK_BONUS,
             mockWorldID,
             "app_test",
             "action_test"
@@ -93,6 +96,8 @@ contract DiamanteMineTest is Test {
             MAX_REWARD_LEVEL,
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
+            STREAK_WINDOW,
+            STREAK_BONUS,
             address(mockWorldID),
             "app_test",
             "action_test"
@@ -141,9 +146,19 @@ contract DiamanteMineTest is Test {
     }
 
     /// @notice Helper function to finish mining as a specific user
-    function _finishMiningAs(address user) internal {
+    function _finishMiningAs(address user)
+        internal
+        returns (
+            uint256 multipliedReward,
+            uint256 referralBonusAmount,
+            uint256 streakBonusAmount,
+            uint256 currentStreak,
+            bool hasReferralBonus
+        )
+    {
         vm.startPrank(user);
-        diamanteMine.finishMining();
+        (multipliedReward, referralBonusAmount, streakBonusAmount, currentStreak, hasReferralBonus) =
+            diamanteMine.finishMining();
         vm.stopPrank();
     }
 
@@ -204,8 +219,10 @@ contract DiamanteMineTest is Test {
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
         // Reward is base reward multiplied by ORO amount / 1e18
-        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
-            // referral bonus
+        uint256 expectedMultipliedReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18;
+        // No streak bonus for first-time mining
+        uint256 expectedStreakBonus = 0;
+        uint256 expectedTotalReward = expectedMultipliedReward + expectedStreakBonus; // No referral bonus
 
         uint256 userNullifier = diamanteMine.addressToNullifierHash(user1);
 
@@ -217,12 +234,13 @@ contract DiamanteMineTest is Test {
             userNullifier,
             expectedTotalReward,
             expectedBaseReward,
-            expectedTotalReward - expectedBaseReward,
-            0,
-            false,
+            expectedMultipliedReward - expectedBaseReward,
+            0, // referralBonusAmount
+            false, // hasReferralBonus
             MIN_AMOUNT_IN_ORO
         );
-        diamanteMine.finishMining();
+        (uint256 multipliedReward, uint256 referralBonusAmount, uint256 streakBonusAmount, uint256 currentStreak,) =
+            diamanteMine.finishMining();
         vm.stopPrank();
         uint256 finalDiamanteBalance = diamanteToken.balanceOf(user1);
 
@@ -261,10 +279,14 @@ contract DiamanteMineTest is Test {
         uint256 rewardLevel = (activeMinersBefore - 1) % diamanteMine.maxRewardLevel();
         uint256 expectedBonus = diamanteMine.extraRewardPerLevel() * rewardLevel;
         uint256 expectedBaseReward = diamanteMine.minReward() + expectedBonus;
-        uint256 expectedTotalReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18; // No
-            // referral bonus
+        uint256 expectedMultipliedReward = (expectedBaseReward * MIN_AMOUNT_IN_ORO) / 1e18;
+        // No streak bonus for first-time mining
+        uint256 expectedStreakBonus = 0;
+        uint256 expectedTotalReward = expectedMultipliedReward + expectedStreakBonus; // No referral bonus
 
         uint256 firstMinerNullifier = diamanteMine.addressToNullifierHash(firstMiner);
+
+        uint256 initialDiamanteBalance = diamanteToken.balanceOf(firstMiner);
 
         // Prank must be immediately before the state-changing call
         vm.prank(firstMiner);
@@ -275,12 +297,18 @@ contract DiamanteMineTest is Test {
             firstMinerNullifier,
             expectedTotalReward,
             expectedBaseReward,
-            expectedTotalReward - expectedBaseReward,
-            0,
-            false,
+            expectedMultipliedReward - expectedBaseReward,
+            0, // referralBonusAmount
+            false, // hasReferralBonus
             MIN_AMOUNT_IN_ORO
         );
-        diamanteMine.finishMining();
+        (uint256 multipliedReward, uint256 referralBonusAmount, uint256 streakBonusAmount, uint256 currentStreak,) =
+            diamanteMine.finishMining();
+        vm.stopPrank();
+        uint256 finalDiamanteBalance = diamanteToken.balanceOf(firstMiner);
+
+        uint256 rewardReceived = finalDiamanteBalance - initialDiamanteBalance;
+        assertEq(rewardReceived, expectedTotalReward, "First miner should receive correct reward");
     }
 
     function test_Fail_StartMining_AlreadyMining() public {
@@ -768,19 +796,6 @@ contract DiamanteMineTest is Test {
         assertEq(rewardReceived, expected, "Should get exactly 7x the base reward");
     }
 
-    function test_MaxReward_Calculation() public view {
-        // Test that maxReward() returns correct value
-        uint256 maxRewardValue = diamanteMine.maxReward();
-
-        // Expected: (minReward + maxLevelBonus) * maxOro / 1e18 * (1 + referralBonus)
-        uint256 maxBaseReward =
-            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
-        uint256 maxMiningReward = (maxBaseReward * MAX_AMOUNT_IN_ORO) / 1e18;
-        uint256 expectedMaxReward = (maxMiningReward * (10_000 + REFERRAL_BONUS_BPS)) / 10_000;
-
-        assertEq(maxRewardValue, expectedMaxReward, "maxReward() should return correct maximum possible reward");
-    }
-
     function test_RewardScaling_Linear() public {
         // Test that rewards scale linearly with ORO amount
         uint256[] memory oroAmounts = new uint256[](3);
@@ -1117,7 +1132,7 @@ contract DiamanteMineTest is Test {
         uint256 expectedTotal = miningReward + referralBonus;
 
         vm.startPrank(user1);
-        (,, bool hasReferralBonus) = diamanteMine.finishMining();
+        (,, uint256 streakBonusAmount, uint256 currentStreak, bool hasReferralBonus) = diamanteMine.finishMining();
         vm.stopPrank();
 
         uint256 rewardReceived = diamanteToken.balanceOf(user1) - initialBalance;
@@ -1254,7 +1269,7 @@ contract DiamanteMineTest is Test {
         assertEq(requiredBalance, expectedRequired, "Should calculate required balance correctly using maxBaseReward");
     }
 
-    function test_CalculateRequiredBalance_RealisticScenario() public {
+    function test_CalculateRequiredBalance_RealisticScenario() public view {
         // Test with a realistic scenario where many users are mining
         uint256 numMiners = 100;
         uint256 averageOroPerMiner = 10 * 1e18; // 10 ORO each
@@ -1856,5 +1871,343 @@ contract DiamanteMineTest is Test {
         // Should revert when trying to decode invalid data
         vm.expectRevert();
         diamanteMine.startMining(invalidData, root, nullifier, proof, permit);
+    }
+
+    //-//////////////////////////////////////////////////////////////////////////
+    //- STREAK FUNCTIONALITY TESTS
+    //-//////////////////////////////////////////////////////////////////////////
+
+    function test_StreakInitialization() public view {
+        // Test that streak parameters are properly initialized
+        assertEq(diamanteMine.streakBonus(), STREAK_BONUS, "Streak bonus should be initialized correctly");
+    }
+
+    function test_FirstTimeMining_EstablishesStreakOfOne() public {
+        // User3 has never mined before (using user3 to avoid conflicts with other tests)
+        address testUser = user3;
+        uint256 nullifierHash = uint256(keccak256(abi.encodePacked(testUser)));
+        assertEq(diamanteMine.userStreak(testUser), 0, "Initial streak should be 0");
+        assertEq(diamanteMine.lastFinishedMiningAt(nullifierHash), 0, "Initial lastFinishedMiningAt should be 0");
+
+        // User starts and finishes mining for the first time
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        uint256 initialBalance = diamanteToken.balanceOf(testUser);
+        (uint256 multipliedReward, uint256 referralBonusAmount, uint256 streakBonusAmount, uint256 currentStreak,) =
+            _finishMiningAs(testUser);
+
+        // Verify streak is established as 1
+        assertEq(currentStreak, 1, "First-time mining should establish streak of 1");
+        assertEq(diamanteMine.userStreak(testUser), 1, "Stored streak should be 1");
+        assertTrue(diamanteMine.lastFinishedMiningAt(nullifierHash) > 0, "lastFinishedMiningAt should be set");
+
+        // Verify streak bonus is 0 for first-time mining
+        uint256 expectedStreakBonus = 0;
+        assertEq(streakBonusAmount, expectedStreakBonus, "Streak bonus should be 0 for first-time mining");
+
+        // Verify total reward (no streak bonus for first mine)
+        uint256 expectedTotalReward = multipliedReward + referralBonusAmount + streakBonusAmount;
+        uint256 actualReward = diamanteToken.balanceOf(testUser) - initialBalance;
+        assertEq(actualReward, expectedTotalReward, "Total reward should not include streak bonus for first mine");
+    }
+
+    function test_StreakContinuation_WithinInterval() public {
+        address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_continue_test")))));
+        oroToken.mint(testUser, 1000 * 1e18);
+        vm.prank(testUser);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+
+        uint256 nullifierHash = uint256(keccak256(abi.encodePacked(testUser)));
+
+        // First mining session
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (,, uint256 streakBonus1, uint256 streak1,) = _finishMiningAs(testUser);
+        assertEq(streak1, 1, "First streak should be 1");
+
+        uint256 finishTime1 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Second mining session within streak window (maintains streak)
+        vm.warp(finishTime1 + 2 hours); // Start second session well within window
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1); // Finish within streak window
+
+        uint256 initialBalance = diamanteToken.balanceOf(testUser);
+        (uint256 multipliedReward2, uint256 referralBonus2, uint256 streakBonus2, uint256 streak2,) =
+            _finishMiningAs(testUser);
+
+        // Verify streak continued and incremented
+        assertEq(streak2, 2, "Second streak should be 2");
+        assertEq(diamanteMine.userStreak(testUser), 2, "Stored streak should be 2");
+
+        // Verify streak bonus for level 1 (streak of 2)
+        uint256 expectedStreakBonus2 = STREAK_BONUS;
+        assertEq(streakBonus2, expectedStreakBonus2, "Streak bonus should be calculated correctly for level 1");
+
+        // Third mining session to verify streak continues
+        uint256 finishTime2 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+        vm.warp(finishTime2 + 2 hours); // Well within streak window
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (uint256 multipliedReward3,, uint256 streakBonus3, uint256 streak3,) = _finishMiningAs(testUser);
+
+        assertEq(streak3, 3, "Third streak should be 3");
+        // Verify streak bonus for level 2 (streak of 3)
+        uint256 expectedStreakBonus3 = STREAK_BONUS;
+        assertEq(streakBonus3, expectedStreakBonus3, "Streak bonus should be calculated correctly for level 2");
+    }
+
+    function test_StreakBreak_AfterInterval() public {
+        address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_break_test_unique_12345")))));
+        oroToken.mint(testUser, 1000 * 1e18);
+        vm.prank(testUser);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+
+        uint256 nullifierHash = uint256(keccak256(abi.encodePacked(testUser)));
+
+        // Build up a streak first
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (,,, uint256 streak1,) = _finishMiningAs(testUser);
+        assertEq(streak1, 1, "First streak should be 1");
+
+        uint256 finishTime1 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Continue streak
+        vm.warp(finishTime1 + 2 hours);
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (,,, uint256 streak2,) = _finishMiningAs(testUser);
+        assertEq(streak2, 2, "Second streak should be 2");
+
+        uint256 finishTime2 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Mine after 2x miningInterval (breaks streak)
+        vm.warp(finishTime2 + (diamanteMine.miningInterval() * 2) + 1 hours); // Beyond 2x interval
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+
+        (uint256 multipliedReward3,, uint256 streakBonus3, uint256 streak3,) = _finishMiningAs(testUser);
+
+        // Verify streak was reset to 1
+        assertEq(streak3, 1, "Streak should be reset to 1 after break");
+        assertEq(diamanteMine.userStreak(testUser), 1, "Stored streak should be reset to 1");
+
+        // Verify streak bonus is 0 for level 1 (reset streak)
+        uint256 expectedStreakBonus3 = 0;
+        assertEq(streakBonus3, expectedStreakBonus3, "Streak bonus should be 0 for a broken streak reset to 1");
+    }
+
+    function test_StreakBonusWithReferralBonus() public {
+        address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_referral_test")))));
+        oroToken.mint(testUser, 100 * 1e18);
+        vm.prank(testUser);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        uint256 nullifierHash = uint256(keccak256(abi.encodePacked(testUser)));
+
+        // Build up a streak for user1 first
+        _startMiningAs(testUser, address(0), 3 * 1e18);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(testUser);
+
+        uint256 lastFinishTime = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Continue streak and add referral bonus
+        vm.warp(lastFinishTime + 2 hours);
+        _startMiningAs(testUser, user2, 3 * 1e18); // Refer user2
+
+        // User2 starts mining within referral window
+        vm.warp(block.timestamp + 2 hours);
+        _startMiningAs(user2, address(0), 2 * 1e18);
+
+        // User1 finishes mining (should get both streak and referral bonus)
+        vm.warp(block.timestamp + diamanteMine.miningInterval() - 2 hours + 1);
+        uint256 initialBalance = diamanteToken.balanceOf(testUser);
+
+        (
+            uint256 multipliedReward,
+            uint256 referralBonus,
+            uint256 streakBonus,
+            uint256 currentStreak,
+            bool hasReferralBonus
+        ) = _finishMiningAs(testUser);
+
+        // Verify both bonuses are present
+        assertEq(currentStreak, 2, "Should have streak of 2");
+        assertTrue(hasReferralBonus, "Should have referral bonus");
+        assertTrue(streakBonus > 0, "Should have streak bonus");
+        assertTrue(referralBonus > 0, "Should have referral bonus");
+
+        // Verify bonus calculations
+        uint256 expectedStreakBonus = STREAK_BONUS;
+        uint256 expectedReferralBonus = (multipliedReward * REFERRAL_BONUS_BPS) / 10_000;
+
+        assertEq(streakBonus, expectedStreakBonus, "Streak bonus should be calculated correctly");
+        assertEq(referralBonus, expectedReferralBonus, "Referral bonus should be calculated correctly");
+
+        // Verify total reward includes both bonuses
+        uint256 expectedTotalReward = multipliedReward + referralBonus + streakBonus;
+        uint256 actualReward = diamanteToken.balanceOf(testUser) - initialBalance;
+        assertEq(actualReward, expectedTotalReward, "Total reward should include both streak and referral bonuses");
+    }
+
+    function test_StreakStatePersistence() public {
+        address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_persistence_test")))));
+        oroToken.mint(testUser, 100 * 1e18);
+        vm.prank(testUser);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        uint256 nullifierHash = uint256(keccak256(abi.encodePacked(testUser)));
+
+        // Initial state should be empty
+        assertEq(diamanteMine.userStreak(testUser), 0, "Initial streak should be 0");
+        assertEq(diamanteMine.lastFinishedMiningAt(nullifierHash), 0, "Initial lastFinishedMiningAt should be 0");
+
+        // First mining session
+        uint256 startTime1 = block.timestamp;
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        uint256 finishTime1 = block.timestamp;
+        _finishMiningAs(testUser);
+
+        // Verify state after first mining
+        assertEq(diamanteMine.userStreak(testUser), 1, "Streak should be 1 after first mining");
+        assertEq(
+            diamanteMine.lastFinishedMiningAt(nullifierHash),
+            finishTime1,
+            "lastFinishedMiningAt should be set to finish time"
+        );
+
+        // Second mining session
+        vm.warp(finishTime1 + 2 hours);
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(testUser);
+        uint256 finishTime2 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Verify state after second mining
+        assertEq(diamanteMine.userStreak(testUser), 2, "Streak should be 2 after second mining");
+        assertEq(
+            diamanteMine.lastFinishedMiningAt(nullifierHash),
+            finishTime2,
+            "lastFinishedMiningAt should be updated to latest finish time"
+        );
+
+        // Verify that starting a new mining session doesn't affect streak state until completion
+        vm.warp(finishTime2 + 2 hours);
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+
+        // State should not change until mining is finished
+        assertEq(diamanteMine.userStreak(testUser), 2, "Streak should remain 2 until mining is finished");
+        assertEq(
+            diamanteMine.lastFinishedMiningAt(nullifierHash),
+            finishTime2,
+            "lastFinishedMiningAt should remain unchanged until mining is finished"
+        );
+
+        // Finish the third mining session
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(testUser);
+        uint256 finishTime3 = diamanteMine.lastFinishedMiningAt(nullifierHash);
+
+        // Verify final state
+        assertEq(diamanteMine.userStreak(testUser), 3, "Final streak should be 3");
+        assertEq(
+            diamanteMine.lastFinishedMiningAt(nullifierHash),
+            finishTime3,
+            "lastFinishedMiningAt should be updated to final finish time"
+        );
+    }
+
+    function test_MaxReward_IncludesStreakBonus() public view {
+        // Test that maxReward() function includes streak bonus in calculation
+        uint256 maxRewardValue = diamanteMine.maxReward();
+
+        // Manual calculation of expected max reward
+        uint256 maxBaseReward =
+            diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
+        uint256 maxMiningReward = (maxBaseReward * diamanteMine.maxAmountOro()) / 1e18;
+        uint256 expectedMaxReward = ((maxMiningReward + STREAK_BONUS) * (10_000 + REFERRAL_BONUS_BPS)) / 10_000;
+
+        assertEq(maxRewardValue, expectedMaxReward, "maxReward() should include streak bonus in calculation");
+
+        // Verify it's greater than the old calculation without streak bonus
+        uint256 oldMaxReward = (maxMiningReward * (10_000 + REFERRAL_BONUS_BPS)) / 10_000;
+        assertTrue(
+            maxRewardValue > oldMaxReward, "New maxReward should be greater than old calculation without streak bonus"
+        );
+
+        // Verify the streak bonus component
+        uint256 streakBonusComponent = STREAK_BONUS * (10_000 + REFERRAL_BONUS_BPS) / 10_000;
+        assertEq(
+            maxRewardValue - oldMaxReward,
+            streakBonusComponent,
+            "Difference should equal the streak bonus component with referral factor"
+        );
+    }
+
+    function test_SetStreakBonus() public {
+        uint256 newStreakBonus = 0.1e18; // 0.1
+
+        // --- Success ---
+        vm.prank(owner);
+        diamanteMine.setStreakBonus(newStreakBonus);
+        assertEq(diamanteMine.streakBonus(), newStreakBonus, "Streak bonus should be updated");
+
+        // --- Fail: Non-Owner ---
+        vm.prank(user1);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
+        diamanteMine.setStreakBonus(newStreakBonus);
+
+        // Test that new value affects calculations (need level 2+ for streak bonus)
+        address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_bps_test")))));
+        oroToken.mint(testUser, 100 * 1e18);
+        vm.prank(testUser);
+        oroToken.approve(address(mockPermit2), type(uint256).max);
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(testUser); // First mine (streak 1)
+
+        // Second mine to test streak bonus
+        uint256 lastFinishTime = diamanteMine.lastFinishedMiningAt(diamanteMine.addressToNullifierHash(testUser));
+        vm.warp(lastFinishTime + 2 hours);
+        _startMiningAs(testUser, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        (uint256 multipliedReward,, uint256 streakBonus,,) = _finishMiningAs(testUser);
+
+        uint256 expectedMultipliedReward = (diamanteMine.minReward() * MIN_AMOUNT_IN_ORO) / 1e18;
+        uint256 expectedStreakBonus = newStreakBonus;
+        assertEq(streakBonus, expectedStreakBonus, "Streak bonus should use new BPS value for streak level 1");
+    }
+
+    function test_CalculateStreakEndTime() public {
+        // Initially, should be 0
+        assertEq(diamanteMine.calculateStreakEndTime(user1), 0, "Initial streak end time should be 0");
+
+        // After one mining session
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(user1);
+
+        uint256 nullifierHash = diamanteMine.addressToNullifierHash(user1);
+        uint256 lastFinished = diamanteMine.lastFinishedMiningAt(nullifierHash);
+        uint256 expectedEndTime = lastFinished + STREAK_WINDOW;
+        assertEq(
+            diamanteMine.calculateStreakEndTime(user1),
+            expectedEndTime,
+            "Should calculate correct end time after one mine"
+        );
+
+        // After another session
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _startMiningAs(user1, address(0), MIN_AMOUNT_IN_ORO);
+        vm.warp(block.timestamp + diamanteMine.miningInterval() + 1);
+        _finishMiningAs(user1);
+
+        lastFinished = diamanteMine.lastFinishedMiningAt(nullifierHash);
+        expectedEndTime = lastFinished + STREAK_WINDOW;
+        assertEq(
+            diamanteMine.calculateStreakEndTime(user1), expectedEndTime, "Should update end time after second mine"
+        );
     }
 }

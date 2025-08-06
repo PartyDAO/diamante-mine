@@ -16,7 +16,10 @@ contract MockWorldID is IWorldID {
     )
         external
     {
-        require(!nullifiers[nullifierHash], "MockWorldID: Nullifier has already been used");
+        // This mock allows nullifier reuse for features that require a user to mine
+        // multiple times in a row, like streaks. The DiamanteMineV1_2 contract
+        // contains the necessary logic to prevent a user from starting a new mining
+        // session while another is already in progress.
         nullifiers[nullifierHash] = true;
     }
 }
