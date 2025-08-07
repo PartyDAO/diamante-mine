@@ -14,13 +14,20 @@ contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
 
     DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0x6180C3033Bf7A085AE5640E6480fb4D93eEBa5CC);
-    DiamanteMineV1_2Dev public devImplementation = DiamanteMineV1_2Dev(0xba39c61a5B2d22B674c5E206f43BB949a5e31de0);
+    DiamanteMineV1_2Dev public devImplementation;
 
     // EIP-1967 storage slots
     bytes32 constant IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     function run() external {
         Config[] memory configs = DeploymentConfig.getConfigs();
+
+        // UPGRADE_TARGETS supports '*', single label, or comma-separated labels (e.g. 'jeremy,steve')
+        string memory upgradeTargets = vm.envExists("UPGRADE_TARGETS") ? vm.envString("UPGRADE_TARGETS") : "";
+        bool filterEnabled = bytes(upgradeTargets).length != 0 && !_equals(upgradeTargets, "*");
+        if (filterEnabled) {
+            console.log("UPGRADE_TARGETS filter enabled. Value: '%s'", upgradeTargets);
+        }
 
         // Check if we have any proxies to upgrade
         if (configs.length == 0) {
@@ -48,6 +55,12 @@ contract ValidateDeploysScript is Script {
             Config memory config = configs[i];
             address proxyAddress = config.addr;
             console.log("Checking proxy '%s' at address:", config.label, proxyAddress);
+
+            // Apply optional label filter
+            if (filterEnabled && !_inCsv(upgradeTargets, config.label)) {
+                console.log("-> Skipping proxy '%s' due to label filter.", config.label);
+                continue;
+            }
 
             bool isProduction = config.stateType == StateType.Prod;
             address targetImplementation = isProduction ? address(prodImplementation) : address(devImplementation);
@@ -149,6 +162,37 @@ contract ValidateDeploysScript is Script {
                 return false;
             }
         }
+    }
+
+    function _equals(string memory a, string memory b) internal pure returns (bool) {
+        if (bytes(b).length == 0) return false;
+        return keccak256(bytes(a)) == keccak256(bytes(b));
+    }
+
+    function _inCsv(string memory csv, string memory target) internal pure returns (bool) {
+        if (bytes(csv).length == 0) return false;
+        if (_equals(csv, "*")) return true;
+        if (bytes(target).length == 0) return false;
+
+        bytes memory haystack = bytes(string.concat(",", csv, ","));
+        bytes memory needle = bytes(string.concat(",", target, ","));
+        return _bytesContains(haystack, needle);
+    }
+
+    function _bytesContains(bytes memory haystack, bytes memory needle) internal pure returns (bool) {
+        if (needle.length == 0) return true;
+        if (needle.length > haystack.length) return false;
+        for (uint256 i = 0; i <= haystack.length - needle.length; i++) {
+            bool matchFound = true;
+            for (uint256 j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    matchFound = false;
+                    break;
+                }
+            }
+            if (matchFound) return true;
+        }
+        return false;
     }
 
     function _logManualUpgradeInstructions(
