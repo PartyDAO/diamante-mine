@@ -565,11 +565,11 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
             // Streak is maintained
             currentStreak++;
             streakBonusAmount = streakBonus;
-            emit StreakBonusAwarded(msg.sender, nullifierHash, streakBonusAmount, currentStreak);
         } else {
             // Streak is broken or new
             currentStreak = 1;
         }
+
         userStreak[msg.sender] = currentStreak;
 
         uint256 totalReward = multipliedReward + referralBonusAmount + streakBonusAmount;
@@ -598,6 +598,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
             hasReferralBonus,
             amountMined
         );
+
+        emit StreakBonusAwarded(msg.sender, nullifierHash, streakBonusAmount, currentStreak);
 
         return (multipliedReward, referralBonusAmount, streakBonusAmount, currentStreak, hasReferralBonus);
     }
