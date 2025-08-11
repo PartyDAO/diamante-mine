@@ -33,6 +33,9 @@ contract DeployUpgradeableProd is Script {
         uint256 maxRewardLevel = 10;
         uint256 referralBonusBps = 10_000; // 100% bonus
         uint256 miningInterval = 24 hours;
+        // TODO: Set variables
+        uint40 streakWindow;
+        uint256 streakBonusBps;
         string memory actionId = "mine";
 
         // Prepare initialization data
@@ -48,6 +51,8 @@ contract DeployUpgradeableProd is Script {
             maxRewardLevel,
             referralBonusBps,
             miningInterval,
+            streakWindow,
+            streakBonusBps,
             worldId,
             APP_ID,
             actionId
