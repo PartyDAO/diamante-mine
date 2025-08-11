@@ -42,7 +42,7 @@ contract DiamanteMineTest is Test {
     uint256 public constant REFERRAL_BONUS_BPS = 1000; // 10%
     uint256 public constant MINING_INTERVAL = 24 hours;
     uint256 public constant MAX_REWARD_LEVEL = 10;
-    uint256 public constant STREAK_BONUS = 0.05e18; // Flat 0.05 bonus
+    uint256 public constant STREAK_BONUS_BPS = 5000; // 50% streak bonus in bps
     uint256 public constant STREAK_WINDOW = 48 hours;
 
     Permit2 public permit;
@@ -76,7 +76,7 @@ contract DiamanteMineTest is Test {
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
             STREAK_WINDOW,
-            STREAK_BONUS,
+            STREAK_BONUS_BPS,
             mockWorldID,
             "app_test",
             "action_test"
@@ -97,7 +97,7 @@ contract DiamanteMineTest is Test {
             REFERRAL_BONUS_BPS,
             MINING_INTERVAL,
             STREAK_WINDOW,
-            STREAK_BONUS,
+            STREAK_BONUS_BPS,
             address(mockWorldID),
             "app_test",
             "action_test"
@@ -984,7 +984,7 @@ contract DiamanteMineTest is Test {
 
     function test_UpgradeToV2() public {
         // Check initial version
-        assertEq(diamanteMine.VERSION(), "1.2.1");
+        assertEq(diamanteMine.VERSION(), "1.2.2");
 
         // Set some state in V1
         vm.prank(owner);
@@ -1155,8 +1155,10 @@ contract DiamanteMineTest is Test {
         uint256 maxBaseReward =
             diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
         uint256 maxPossibleReward = (maxBaseReward * totalActiveOro) / 1e18;
-        uint256 maxPossibleRewardWithBonus =
-            (maxPossibleReward * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
+        // Apply streak bonus bps conservatively
+        uint256 withStreak = (maxPossibleReward * (10_000 + diamanteMine.streakBonusBps())) / 10_000;
+        // Assume 10% of users get referral bonus
+        uint256 maxPossibleRewardWithBonus = (withStreak * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
         uint256 expectedRequiredBalance = (maxPossibleRewardWithBonus * 6500) / 10_000; // SAFE_LIMIT_PERCENTAGE_BPS
 
         assertEq(requiredBalance, expectedRequiredBalance, "Required balance should match expected calculation");
@@ -1259,11 +1261,12 @@ contract DiamanteMineTest is Test {
         // With the fix, it should return a proper value
         assertTrue(requiredBalance > 0, "Fixed implementation should not return 0");
 
-        // Verify it's using maxBaseReward calculation directly
+        // Verify it's using maxBaseReward calculation directly (with streak bps and 10% referral-sharing assumption)
         uint256 maxBaseReward =
             diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
         uint256 expectedMaxReward = (maxBaseReward * totalActiveOro) / 1e18;
-        uint256 expectedWithBonus = (expectedMaxReward * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
+        uint256 withStreak = (expectedMaxReward * (10_000 + diamanteMine.streakBonusBps())) / 10_000;
+        uint256 expectedWithBonus = (withStreak * (10_000 + (diamanteMine.referralBonusBps() / 10))) / 10_000;
         uint256 expectedRequired = (expectedWithBonus * 6500) / 10_000;
 
         assertEq(requiredBalance, expectedRequired, "Should calculate required balance correctly using maxBaseReward");
@@ -1879,7 +1882,7 @@ contract DiamanteMineTest is Test {
 
     function test_StreakInitialization() public view {
         // Test that streak parameters are properly initialized
-        assertEq(diamanteMine.streakBonus(), STREAK_BONUS, "Streak bonus should be initialized correctly");
+        assertEq(diamanteMine.streakBonusBps(), STREAK_BONUS_BPS, "Streak bonus bps should be initialized correctly");
     }
 
     function test_FirstTimeMining_EstablishesStreakOfOne() public {
@@ -1942,7 +1945,7 @@ contract DiamanteMineTest is Test {
         assertEq(diamanteMine.userStreak(testUser), 2, "Stored streak should be 2");
 
         // Verify streak bonus for level 1 (streak of 2)
-        uint256 expectedStreakBonus2 = STREAK_BONUS;
+        uint256 expectedStreakBonus2 = (multipliedReward2 * STREAK_BONUS_BPS) / 10_000;
         assertEq(streakBonus2, expectedStreakBonus2, "Streak bonus should be calculated correctly for level 1");
 
         // Third mining session to verify streak continues
@@ -1954,7 +1957,7 @@ contract DiamanteMineTest is Test {
 
         assertEq(streak3, 3, "Third streak should be 3");
         // Verify streak bonus for level 2 (streak of 3)
-        uint256 expectedStreakBonus3 = STREAK_BONUS;
+        uint256 expectedStreakBonus3 = (multipliedReward3 * STREAK_BONUS_BPS) / 10_000;
         assertEq(streakBonus3, expectedStreakBonus3, "Streak bonus should be calculated correctly for level 2");
     }
 
@@ -2040,7 +2043,7 @@ contract DiamanteMineTest is Test {
         assertTrue(referralBonus > 0, "Should have referral bonus");
 
         // Verify bonus calculations
-        uint256 expectedStreakBonus = STREAK_BONUS;
+        uint256 expectedStreakBonus = (multipliedReward * STREAK_BONUS_BPS) / 10_000;
         uint256 expectedReferralBonus = (multipliedReward * REFERRAL_BONUS_BPS) / 10_000;
 
         assertEq(streakBonus, expectedStreakBonus, "Streak bonus should be calculated correctly");
@@ -2127,7 +2130,8 @@ contract DiamanteMineTest is Test {
         uint256 maxBaseReward =
             diamanteMine.minReward() + (diamanteMine.extraRewardPerLevel() * diamanteMine.maxRewardLevel());
         uint256 maxMiningReward = (maxBaseReward * diamanteMine.maxAmountOro()) / 1e18;
-        uint256 expectedMaxReward = ((maxMiningReward + STREAK_BONUS) * (10_000 + REFERRAL_BONUS_BPS)) / 10_000;
+        uint256 expectedMaxReward =
+            ((maxMiningReward * (10_000 + STREAK_BONUS_BPS)) / 10_000) * (10_000 + REFERRAL_BONUS_BPS) / 10_000;
 
         assertEq(maxRewardValue, expectedMaxReward, "maxReward() should include streak bonus in calculation");
 
@@ -2138,7 +2142,8 @@ contract DiamanteMineTest is Test {
         );
 
         // Verify the streak bonus component
-        uint256 streakBonusComponent = STREAK_BONUS * (10_000 + REFERRAL_BONUS_BPS) / 10_000;
+        uint256 streakBonusComponent =
+            (maxMiningReward * STREAK_BONUS_BPS) / 10_000 * (10_000 + REFERRAL_BONUS_BPS) / 10_000;
         assertEq(
             maxRewardValue - oldMaxReward,
             streakBonusComponent,
@@ -2147,17 +2152,17 @@ contract DiamanteMineTest is Test {
     }
 
     function test_SetStreakBonus() public {
-        uint256 newStreakBonus = 0.1e18; // 0.1
+        uint256 newStreakBonus = 1000; // 10% in bps
 
         // --- Success ---
         vm.prank(owner);
-        diamanteMine.setStreakBonus(newStreakBonus);
-        assertEq(diamanteMine.streakBonus(), newStreakBonus, "Streak bonus should be updated");
+        diamanteMine.setStreakBonusBps(newStreakBonus);
+        assertEq(diamanteMine.streakBonusBps(), newStreakBonus, "Streak bonus bps should be updated");
 
         // --- Fail: Non-Owner ---
         vm.prank(user1);
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user1));
-        diamanteMine.setStreakBonus(newStreakBonus);
+        diamanteMine.setStreakBonusBps(newStreakBonus);
 
         // Test that new value affects calculations (need level 2+ for streak bonus)
         address testUser = address(uint160(uint256(keccak256(abi.encodePacked("streak_bps_test")))));
@@ -2176,7 +2181,7 @@ contract DiamanteMineTest is Test {
         (uint256 multipliedReward,, uint256 streakBonus,,) = _finishMiningAs(testUser);
 
         uint256 expectedMultipliedReward = (diamanteMine.minReward() * MIN_AMOUNT_IN_ORO) / 1e18;
-        uint256 expectedStreakBonus = newStreakBonus;
+        uint256 expectedStreakBonus = (expectedMultipliedReward * newStreakBonus) / 10_000;
         assertEq(streakBonus, expectedStreakBonus, "Streak bonus should use new BPS value for streak level 1");
     }
 
