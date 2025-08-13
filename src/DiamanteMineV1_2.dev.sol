@@ -515,15 +515,19 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
         require(lastMinedAt[nullifierHash] == 0, AlreadyMining());
         require(amount >= minAmountOro && amount <= maxAmountOro, InvalidOroAmount(amount, minAmountOro, maxAmountOro));
-        require(
-            DIAMANTE.balanceOf(address(this)) >= calculateRequiredBalance(activeOroMining + amount),
-            InsufficientBalanceForReward()
-        );
+        if (block.timestamp >= balanceCheckDisabledUntil) {
+            require(
+                DIAMANTE.balanceOf(address(this)) >= calculateRequiredBalance(activeOroMining + amount),
+                InsufficientBalanceForReward()
+            );
+        }
 
         // Verify proof of personhood before any state changes
-        WORLD_ID.verifyProof(
-            root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
-        );
+        if (block.timestamp >= verificationDisabledUntil) {
+            WORLD_ID.verifyProof(
+                root, GROUP_ID, abi.encodePacked(msg.sender).hashToField(), nullifierHash, EXTERNAL_NULLIFIER, proof
+            );
+        }
 
         activeMiners++;
         activeOroMining += amount;
