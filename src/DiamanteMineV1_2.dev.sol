@@ -154,8 +154,8 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
     uint256 private constant MAX_BPS = 10_000;
 
-    /// @notice The safe limit percentage in basis points to apply to required balance calculations.
-    /// @dev This allows for a more conservative estimate than worst-case scenario.
+    /// @notice Operational reserve fraction in basis points used by calculateRequiredBalance().
+    /// @dev Heuristic for external sizing/alerts only. Not a worst-case guarantee.
     uint256 private constant SAFE_LIMIT_PERCENTAGE_BPS = 6500; // 65%
 
     /// @notice The DIAMANTE token contract. This is the reward token.
@@ -312,14 +312,15 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /// @notice Returns the contract version.
     /// @return The contract version string.
     function VERSION() external pure virtual returns (string memory) {
-        return "1.2.2";
+        return "1.2.3";
     }
 
     /// @notice Calculates the maximum possible bonus reward.
     /// @return The maximum bonus reward amount.
     function maxBonusReward() public view returns (uint256) {
-        // The max bonus assuming highest possible level (maxRewardLevel)
-        return extraRewardPerLevel * maxRewardLevel;
+        if (maxRewardLevel == 0) return 0;
+        // Reward levels range from 0 to (maxRewardLevel - 1). Highest bonus is at (maxRewardLevel - 1).
+        return extraRewardPerLevel * (maxRewardLevel - 1);
     }
 
     /// @notice Calculates the maximum base reward (minimum reward + maximum bonus).
@@ -331,12 +332,10 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /// @notice Calculates the maximum possible total reward including referral bonus.
     /// @return The maximum total reward amount.
     function maxReward() public view returns (uint256) {
-        // Max Mining Reward = Max Base Reward * Max ORO Amount / 1e18 (treat ORO as whole tokens)
         uint256 maxMiningReward = (maxBaseReward() * maxAmountOro) / 1e18;
-
-        // Apply streak bonus percentage, then referral bonus percentage
-        uint256 withStreak = (maxMiningReward * (MAX_BPS + streakBonusBps)) / MAX_BPS;
-        return (withStreak * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+        uint256 streakBonus = (maxMiningReward * streakBonusBps) / MAX_BPS;
+        uint256 referralBonus = (maxMiningReward * referralBonusBps) / MAX_BPS;
+        return maxMiningReward + streakBonus + referralBonus;
     }
 
     /// @notice Represents the mining state of a user.
@@ -558,9 +557,9 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /// @notice Finishes the mining process and claims the reward.
     /// @dev The user must have been mining for at least `miningInterval`.
     ///      Reward = base reward * ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
-    ///      Streak bonus = base reward * streak level * streak bonus per level bps
-    ///      Referral bonus = base reward * referral bonus bps
-    ///      Total reward = base reward + referral bonus + streak bonus
+    ///      Streak bonus = miningReward * streak bonus bps (if streak maintained)
+    ///      Referral bonus = miningReward * referral bonus bps (if eligible)
+    ///      Total reward = miningReward + referral bonus + streak bonus (additive)
     /// @return multipliedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
     /// @return streakBonusAmount The amount of DIAMANTE tokens earned as a streak bonus.
@@ -603,7 +602,7 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
             hasReferralBonus = true;
         }
 
-        // Streak bonus logic (static percentage when streak >= 1)
+        // Streak bonus logic
         bool isStreakMaintained = lastFinishedMiningAt[nullifierHash] > 0
             && block.timestamp - lastFinishedMiningAt[nullifierHash] <= streakWindow;
         currentStreak = _userStreak[msg.sender];
@@ -619,7 +618,6 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
         uint256 totalReward = multipliedReward + referralBonusAmount + streakBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
-
         if (activeOroMining >= amountMined) activeOroMining -= amountMined;
         else activeOroMining = 0;
 
@@ -637,7 +635,7 @@ contract DiamanteMineV1_2Dev is Initializable, UUPSUpgradeable, OwnableUpgradeab
             nullifierHash,
             totalReward,
             baseReward,
-            multipliedReward - baseReward, // rewardMultiplier is the additional reward from ORO multiplier
+            multipliedReward > baseReward ? multipliedReward - baseReward : 0,
             referralBonusAmount,
             hasReferralBonus,
             amountMined
