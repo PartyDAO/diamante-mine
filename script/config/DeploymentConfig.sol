@@ -153,7 +153,7 @@ library DeploymentConfig {
 
         configs[4] = Config({
             label: "jeremy",
-            addr: 0x2b6ceB2058FbCE142DCd2F0b5DD1B2d88436994D,
+            addr: 0xda2687a5F683355a5d8cf3C6189a80cBD6746590,
             appId: "app_af6f1a981af93b88be6e35c7d787964f",
             actionId: "mine",
             stateType: StateType.Dev

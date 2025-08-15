@@ -50,6 +50,20 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         uint256 amountMined
     );
 
+    /// @notice Emitted when a streak bonus is awarded.
+    /// @param user The address of the user who received the bonus.
+    /// @param nullifierHash The nullifier hash of the user's World ID proof.
+    /// @param streakBonusAmount The amount of the streak bonus.
+    /// @param streakBonusBps The applied streak bonus in basis points.
+    /// @param currentStreak The user's current streak count.
+    event StreakBonusAwarded(
+        address indexed user,
+        uint256 indexed nullifierHash,
+        uint256 streakBonusAmount,
+        uint256 streakBonusBps,
+        uint256 currentStreak
+    );
+
     /// @notice Emitted when the contract is initialized.
     /// @param initialOwner The initial owner of the contract.
     /// @param diamante The address of the DIAMANTE token.
@@ -61,6 +75,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @param maxRewardLevel The maximum reward level.
     /// @param referralBonusBps The referral bonus in basis points.
     /// @param miningInterval The mining interval duration in seconds.
+    /// @param streakWindow The duration after which a mining streak is considered broken.
+    /// @param streakBonusBps The bonus percentage in basis points for maintaining a mining streak.
     /// @param worldId The address of the World ID contract.
     /// @param appId The World ID application ID.
     /// @param actionId The World ID action ID.
@@ -75,6 +91,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         uint256 maxRewardLevel,
         uint256 referralBonusBps,
         uint256 miningInterval,
+        uint256 streakWindow,
+        uint256 streakBonusBps,
         address worldId,
         string appId,
         string actionId
@@ -121,8 +139,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
 
     uint256 private constant MAX_BPS = 10_000;
 
-    /// @notice The safe limit percentage in basis points to apply to required balance calculations.
-    /// @dev This allows for a more conservative estimate than worst-case scenario.
+    /// @notice Operational reserve fraction in basis points used by calculateRequiredBalance().
+    /// @dev Heuristic for external sizing/alerts only. Not a worst-case guarantee.
     uint256 private constant SAFE_LIMIT_PERCENTAGE_BPS = 6500; // 65%
 
     /// @notice The DIAMANTE token contract. This is the reward token.
@@ -166,6 +184,16 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice The total amount of ORO all active users are currently mining with.
     uint256 public activeOroMining;
 
+    /// @notice The duration after which a mining streak is considered broken.
+    uint40 public streakWindow;
+    /// @notice The bonus percentage in basis points for maintaining a mining streak.
+    uint256 public streakBonusBps;
+
+    /// @notice Maps a nullifier hash to the timestamp of the last successful mine.
+    mapping(uint256 nullifierHash => uint256 timestamp) public lastFinishedMiningAt;
+    /// @notice Maps a user's address to their current mining streak.
+    mapping(address userAddress => uint256 numOfConsecutiveMines) internal _userStreak;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(ISignatureTransfer _permit2) Permit2Helper(_permit2) {
         _disableInitializers();
@@ -186,6 +214,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @param _maxRewardLevel The maximum reward level.
     /// @param _referralBonusBps The referral bonus in basis points.
     /// @param _miningInterval The mining interval duration in seconds.
+    /// @param _streakWindow The duration after which a mining streak is considered broken.
+    /// @param _streakBonusBps The bonus percentage in basis points for maintaining a mining streak.
     /// @param _worldId The address of the World ID contract.
     /// @param _appId The World ID application ID.
     /// @param _actionId The World ID action ID.
@@ -200,6 +230,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         uint256 _maxRewardLevel,
         uint256 _referralBonusBps,
         uint256 _miningInterval,
+        uint40 _streakWindow,
+        uint256 _streakBonusBps,
         IWorldID _worldId,
         string memory _appId,
         string memory _actionId
@@ -224,7 +256,9 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         maxRewardLevel = _maxRewardLevel;
         referralBonusBps = _referralBonusBps;
         miningInterval = _miningInterval;
+        streakWindow = _streakWindow;
         WORLD_ID = _worldId;
+        streakBonusBps = _streakBonusBps;
 
         emit Initialized(
             _initialOwner,
@@ -237,6 +271,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
             _maxRewardLevel,
             _referralBonusBps,
             _miningInterval,
+            _streakWindow,
+            _streakBonusBps,
             address(_worldId),
             _appId,
             _actionId
@@ -257,14 +293,15 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice Returns the contract version.
     /// @return The contract version string.
     function VERSION() external pure virtual returns (string memory) {
-        return "1.2.0";
+        return "1.2.3";
     }
 
     /// @notice Calculates the maximum possible bonus reward.
     /// @return The maximum bonus reward amount.
     function maxBonusReward() public view returns (uint256) {
-        // The max bonus assuming highest possible level (maxRewardLevel)
-        return extraRewardPerLevel * maxRewardLevel;
+        if (maxRewardLevel == 0) return 0;
+        // Reward levels range from 0 to (maxRewardLevel - 1). Highest bonus is at (maxRewardLevel - 1).
+        return extraRewardPerLevel * (maxRewardLevel - 1);
     }
 
     /// @notice Calculates the maximum base reward (minimum reward + maximum bonus).
@@ -276,10 +313,10 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice Calculates the maximum possible total reward including referral bonus.
     /// @return The maximum total reward amount.
     function maxReward() public view returns (uint256) {
-        // Max Mining Reward = Max Base Reward * Max ORO Amount / 1e18 (treat ORO as whole tokens)
         uint256 maxMiningReward = (maxBaseReward() * maxAmountOro) / 1e18;
-        // Max Total Reward = Max Mining Reward * (1 + Referral Bonus %)
-        return (maxMiningReward * (MAX_BPS + referralBonusBps)) / MAX_BPS;
+        uint256 streakBonus = (maxMiningReward * streakBonusBps) / MAX_BPS;
+        uint256 referralBonus = (maxMiningReward * referralBonusBps) / MAX_BPS;
+        return maxMiningReward + streakBonus + referralBonus;
     }
 
     /// @notice Represents the mining state of a user.
@@ -360,8 +397,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         minTotalReward = (minBaseRewardAmount * oroAmount) / 1e18;
 
         // Calculate maximum reward (when at maximum reward level)
-        uint256 maxBaseRewardAmount = minReward + (extraRewardPerLevel * maxRewardLevel);
-        maxTotalReward = (maxBaseRewardAmount * oroAmount) / 1e18;
+        maxTotalReward = (maxBaseReward() * oroAmount) / 1e18;
     }
 
     /// @notice Calculates the potential reward range for a user's current mining session.
@@ -389,17 +425,46 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         }
 
         // Calculate the maximum possible reward for the active ORO amount.
-        uint256 maxPossibleReward = ((minReward + (extraRewardPerLevel * maxRewardLevel)) * totalActiveOroMining) / 1e18;
+        uint256 maxPossibleReward = (maxBaseReward() * totalActiveOroMining) / 1e18;
 
+        // Apply streak bonus percentage conservatively (assume eligible)
+        uint256 withStreak = (maxPossibleReward * (MAX_BPS + streakBonusBps)) / MAX_BPS;
         // Factor in potential referral bonuses assuming 10% of users earn referral bonus
-        // maxPossibleRewardWithBonus = maxPossibleReward * (1 + 0.1 * referralBonus%)
-        uint256 maxPossibleRewardWithBonus = (maxPossibleReward * (MAX_BPS + (referralBonusBps / 10))) / MAX_BPS;
+        // withReferral = withStreak * (1 + 0.1 * referralBonus%)
+        uint256 maxPossibleRewardWithBonus = (withStreak * (MAX_BPS + (referralBonusBps / 10))) / MAX_BPS;
 
         // Apply safe limit percentage to avoid over-reserving capital
         // requiredBalance = maxPossibleRewardWithBonus * safeLimitPercentage
         requiredBalance = (maxPossibleRewardWithBonus * SAFE_LIMIT_PERCENTAGE_BPS) / MAX_BPS;
 
         return requiredBalance;
+    }
+
+    /// @notice Calculates the timestamp when a user's streak will end.
+    /// @param user The address of the user.
+    /// @return The timestamp of when the streak will end.
+    function calculateStreakEndTime(address user) public view returns (uint256) {
+        uint256 nullifierHash = addressToNullifierHash[user];
+        uint256 lastFinished = lastFinishedMiningAt[nullifierHash];
+        if (lastFinished == 0) {
+            return 0;
+        }
+        return lastFinished + streakWindow;
+    }
+
+    /// @notice Returns the user's current streak, or 0 if their streak has expired.
+    /// @param user The address of the user.
+    /// @return currentStreak The current active streak count or 0 if expired/not started.
+    function userStreak(address user) public view returns (uint256 currentStreak) {
+        uint256 nullifierHash = addressToNullifierHash[user];
+        uint256 lastFinished = lastFinishedMiningAt[nullifierHash];
+        if (lastFinished == 0) {
+            return 0;
+        }
+        if (block.timestamp > lastFinished + streakWindow) {
+            return 0;
+        }
+        return _userStreak[user];
     }
 
     /*//////////////////////////////////////////////////////////////////////////////
@@ -469,13 +534,24 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice Finishes the mining process and claims the reward.
     /// @dev The user must have been mining for at least `miningInterval`.
     ///      Reward = base reward * ORO amount (2 ORO = 2x reward, 3 ORO = 3x reward, etc.)
+    ///      Streak bonus = miningReward * streak bonus bps (if streak maintained)
+    ///      Referral bonus = miningReward * referral bonus bps (if eligible)
+    ///      Total reward = miningReward + referral bonus + streak bonus (additive)
     /// @return multipliedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
+    /// @return streakBonusAmount The amount of DIAMANTE tokens earned as a streak bonus.
+    /// @return currentStreak The current streak level.
     /// @return hasReferralBonus A boolean indicating if a referral bonus was awarded.
     function finishMining()
         external
         virtual
-        returns (uint256 multipliedReward, uint256 referralBonusAmount, bool hasReferralBonus)
+        returns (
+            uint256 multipliedReward,
+            uint256 referralBonusAmount,
+            uint256 streakBonusAmount,
+            uint256 currentStreak,
+            bool hasReferralBonus
+        )
     {
         uint256 nullifierHash = addressToNullifierHash[msg.sender];
         uint256 startedAt = lastMinedAt[nullifierHash];
@@ -503,17 +579,30 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
             hasReferralBonus = true;
         }
 
-        uint256 totalReward = multipliedReward + referralBonusAmount;
+        // Streak bonus logic
+        bool isStreakMaintained = lastFinishedMiningAt[nullifierHash] > 0
+            && block.timestamp - lastFinishedMiningAt[nullifierHash] <= streakWindow;
+        currentStreak = _userStreak[msg.sender];
+        if (isStreakMaintained) {
+            currentStreak++;
+            streakBonusAmount = (multipliedReward * streakBonusBps) / MAX_BPS;
+        } else {
+            currentStreak = 1;
+        }
+
+        _userStreak[msg.sender] = currentStreak;
+
+        uint256 totalReward = multipliedReward + referralBonusAmount + streakBonusAmount;
 
         if (activeMiners != 0) activeMiners--;
-
         if (activeOroMining >= amountMined) activeOroMining -= amountMined;
         else activeOroMining = 0;
 
         delete lastMinedAt[nullifierHash];
         delete lastRemindedAddress[nullifierHash];
-        delete addressToNullifierHash[msg.sender];
         delete amountOroMinedWith[nullifierHash];
+
+        lastFinishedMiningAt[nullifierHash] = block.timestamp;
 
         DIAMANTE.safeTransfer(msg.sender, totalReward);
 
@@ -523,11 +612,15 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
             nullifierHash,
             totalReward,
             baseReward,
-            multipliedReward - baseReward, // rewardMultiplier is the additional reward from ORO multiplier
+            multipliedReward > baseReward ? multipliedReward - baseReward : 0,
             referralBonusAmount,
             hasReferralBonus,
             amountMined
         );
+
+        emit StreakBonusAwarded(msg.sender, nullifierHash, streakBonusAmount, streakBonusBps, currentStreak);
+
+        return (multipliedReward, referralBonusAmount, streakBonusAmount, currentStreak, hasReferralBonus);
     }
 
     /*//////////////////////////////////////////////////////////////////////////////
@@ -580,6 +673,18 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @param newReferralBonusBps The new referral bonus in bps.
     function setReferralBonusBps(uint256 newReferralBonusBps) external onlyOwner {
         referralBonusBps = newReferralBonusBps;
+    }
+
+    /// @notice Sets the streak window.
+    /// @param newWindow The new streak window in seconds.
+    function setStreakWindow(uint40 newWindow) external onlyOwner {
+        streakWindow = newWindow;
+    }
+
+    /// @notice Sets the streak bonus in basis points.
+    /// @param newStreakBonusBps The new streak bonus in basis points.
+    function setStreakBonusBps(uint256 newStreakBonusBps) external onlyOwner {
+        streakBonusBps = newStreakBonusBps;
     }
 
     /// @notice Deposits ERC20 tokens into the contract. Can only be called by the owner.

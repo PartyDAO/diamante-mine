@@ -13,11 +13,21 @@ import { DeploymentConfig, StateType, Config, DevState, ProdState, StagingState 
 contract ValidateDeploysScript is Script {
     using ByteHasher for bytes;
 
-    DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0xf7F4146649210E61730E1232be8bE417a2E24419);
-    DiamanteMineV1_2Dev public devImplementation = DiamanteMineV1_2Dev(0x230b383A90577A2945Ca9C01A5a9e7DAC7641172);
+    DiamanteMineV1_2 public prodImplementation = DiamanteMineV1_2(0x6180C3033Bf7A085AE5640E6480fb4D93eEBa5CC);
+    DiamanteMineV1_2Dev public devImplementation;
+
+    // EIP-1967 storage slots
+    bytes32 constant IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     function run() external {
         Config[] memory configs = DeploymentConfig.getConfigs();
+
+        // UPGRADE_TARGETS supports '*', single label, or comma-separated labels (e.g. 'jeremy,steve')
+        string memory upgradeTargets = vm.envExists("UPGRADE_TARGETS") ? vm.envString("UPGRADE_TARGETS") : "";
+        bool filterEnabled = bytes(upgradeTargets).length != 0 && !_equals(upgradeTargets, "*");
+        if (filterEnabled) {
+            console.log("UPGRADE_TARGETS filter enabled. Value: '%s'", upgradeTargets);
+        }
 
         // Check if we have any proxies to upgrade
         if (configs.length == 0) {
@@ -40,10 +50,17 @@ contract ValidateDeploysScript is Script {
 
         // 2. Upgrade each proxy to the appropriate implementation.
         uint256 upgradedCount = 0;
+        uint256 manualUpgradeCount = 0;
         for (uint256 i = 0; i < configs.length; i++) {
             Config memory config = configs[i];
             address proxyAddress = config.addr;
             console.log("Checking proxy '%s' at address:", config.label, proxyAddress);
+
+            // Apply optional label filter
+            if (filterEnabled && !_inCsv(upgradeTargets, config.label)) {
+                console.log("-> Skipping proxy '%s' due to label filter.", config.label);
+                continue;
+            }
 
             bool isProduction = config.stateType == StateType.Prod;
             address targetImplementation = isProduction ? address(prodImplementation) : address(devImplementation);
@@ -93,14 +110,21 @@ contract ValidateDeploysScript is Script {
             }
 
             // Get the current implementation address by reading the EIP-1967 storage slot.
-            bytes32 implementationSlot = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-            address currentImplementation = address(uint160(uint256(vm.load(proxyAddress, implementationSlot))));
+            address currentImplementation = address(uint160(uint256(vm.load(proxyAddress, IMPLEMENTATION_SLOT))));
             console.log("Current implementation:", currentImplementation);
             console.log("Target implementation: ", targetImplementation);
 
             // Check if the implementation is already the same
             if (currentImplementation == targetImplementation) {
                 console.log("-> Proxy '%s' already uses the correct implementation. Skipping upgrade.", config.label);
+                continue;
+            }
+
+            // Check if the caller has owner permissions
+            if (!isCallerOwner(proxyAddress)) {
+                console.log("! Warning: Caller is not the owner of proxy '%s'.", config.label);
+                _logManualUpgradeInstructions(config.label, proxyAddress, targetImplementation, isProduction);
+                manualUpgradeCount++;
                 continue;
             }
 
@@ -119,9 +143,94 @@ contract ValidateDeploysScript is Script {
 
         console.log("Total proxies:", configs.length);
         console.log("Successful upgrades:", upgradedCount);
-        console.log("Skipped upgrades:", configs.length - upgradedCount);
+        console.log("Skipped upgrades:", configs.length - upgradedCount - manualUpgradeCount);
+        console.log("Manual upgrades needed:", manualUpgradeCount);
 
         vm.stopBroadcast();
+    }
+
+    function isCallerOwner(address proxyAddress) internal view returns (bool) {
+        // Try to call owner() on the proxy - works for both production and dev versions
+        try DiamanteMineV1_2(proxyAddress).owner() returns (address proxyOwner) {
+            return proxyOwner == msg.sender;
+        } catch {
+            // Fallback to dev version if production version fails
+            try DiamanteMineV1_2Dev(proxyAddress).owner() returns (address proxyOwner) {
+                return proxyOwner == msg.sender;
+            } catch {
+                // If both fail, assume we don't have permission
+                return false;
+            }
+        }
+    }
+
+    function _equals(string memory a, string memory b) internal pure returns (bool) {
+        if (bytes(b).length == 0) return false;
+        return keccak256(bytes(a)) == keccak256(bytes(b));
+    }
+
+    function _inCsv(string memory csv, string memory target) internal pure returns (bool) {
+        if (bytes(csv).length == 0) return false;
+        if (_equals(csv, "*")) return true;
+        if (bytes(target).length == 0) return false;
+
+        bytes memory haystack = bytes(string.concat(",", csv, ","));
+        bytes memory needle = bytes(string.concat(",", target, ","));
+        return _bytesContains(haystack, needle);
+    }
+
+    function _bytesContains(bytes memory haystack, bytes memory needle) internal pure returns (bool) {
+        if (needle.length == 0) return true;
+        if (needle.length > haystack.length) return false;
+        for (uint256 i = 0; i <= haystack.length - needle.length; i++) {
+            bool matchFound = true;
+            for (uint256 j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    matchFound = false;
+                    break;
+                }
+            }
+            if (matchFound) return true;
+        }
+        return false;
+    }
+
+    function _logManualUpgradeInstructions(
+        string memory label,
+        address proxyAddress,
+        address targetImplementation,
+        bool isProduction
+    )
+        internal
+        view
+    {
+        console.log("\n=== MANUAL UPGRADE REQUIRED ===");
+        console.log("Proxy '%s' requires manual upgrade by the owner.", label);
+        console.log("Proxy address:           ", proxyAddress);
+        console.log("Target implementation:   ", targetImplementation);
+
+        // Get the proxy owner
+        address proxyOwner;
+        try DiamanteMineV1_2(proxyAddress).owner() returns (address owner) {
+            proxyOwner = owner;
+        } catch {
+            try DiamanteMineV1_2Dev(proxyAddress).owner() returns (address owner) {
+                proxyOwner = owner;
+            } catch {
+                proxyOwner = address(0);
+            }
+        }
+
+        console.log("Proxy owner:             ", proxyOwner);
+        console.log("Current caller:          ", msg.sender);
+
+        console.log("\nTo upgrade manually, the owner should call:");
+        if (isProduction) {
+            console.log("DiamanteMineV1_2(proxyAddress).upgradeToAndCall(targetImplementation, \"\")");
+        } else {
+            console.log("DiamanteMineV1_2Dev(proxyAddress).upgradeToAndCall(targetImplementation, \"\")");
+        }
+        console.log("===============================\n");
     }
 
     function _validateDevState(DiamanteMineV1_2Dev proxy, string memory label) internal view {

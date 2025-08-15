@@ -30,6 +30,9 @@ contract DeployUpgradeableDiamanteMineDev is Script {
         uint256 maxRewardLevel = 10;
         uint256 referralBonusBps = 500; // 5%
         uint256 miningInterval = 1 days;
+        // Set non-zero streak settings for dev/staging
+        uint40 streakWindow = 48 hours;
+        uint256 streakBonusBps = 5000; // 50%
         string memory actionId = "mine";
 
         string[] memory appIds = new string[](4);
@@ -57,6 +60,8 @@ contract DeployUpgradeableDiamanteMineDev is Script {
                 maxRewardLevel,
                 referralBonusBps,
                 miningInterval,
+                streakWindow,
+                streakBonusBps,
                 worldId,
                 appId,
                 actionId
