@@ -75,7 +75,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @param maxRewardLevel The maximum reward level.
     /// @param referralBonusBps The referral bonus in basis points.
     /// @param miningInterval The mining interval duration in seconds.
-    /// @param streakWindow The duration after which a mining streak is considered broken.
+    /// @param streakWindow Maximum time between the last finish and the next finish to maintain a streak.
     /// @param streakBonusBps The bonus percentage in basis points for maintaining a mining streak.
     /// @param worldId The address of the World ID contract.
     /// @param appId The World ID application ID.
@@ -184,7 +184,9 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @notice The total amount of ORO all active users are currently mining with.
     uint256 public activeOroMining;
 
-    /// @notice The duration after which a mining streak is considered broken.
+    /// @notice Maximum time allowed between the last finish and the next finish to maintain a streak.
+    /// @dev With a 24h `miningInterval`, users must start within 24h so the next finish occurs within `streakWindow`
+    /// (commonly 48h).
     uint40 public streakWindow;
     /// @notice The bonus percentage in basis points for maintaining a mining streak.
     uint256 public streakBonusBps;
@@ -214,7 +216,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     /// @param _maxRewardLevel The maximum reward level.
     /// @param _referralBonusBps The referral bonus in basis points.
     /// @param _miningInterval The mining interval duration in seconds.
-    /// @param _streakWindow The duration after which a mining streak is considered broken.
+    /// @param _streakWindow Maximum time between the last finish and the next finish to maintain a streak.
     /// @param _streakBonusBps The bonus percentage in basis points for maintaining a mining streak.
     /// @param _worldId The address of the World ID contract.
     /// @param _appId The World ID application ID.
@@ -441,6 +443,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     }
 
     /// @notice Calculates the timestamp when a user's streak will end.
+    /// @dev Returns `lastFinishedMiningAt[user] + streakWindow`. The streak is maintained if the next finish occurs
+    /// before this timestamp.
     /// @param user The address of the user.
     /// @return The timestamp of when the streak will end.
     function calculateStreakEndTime(address user) public view returns (uint256) {
@@ -537,6 +541,7 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
     ///      Streak bonus = miningReward * streak bonus bps (if streak maintained)
     ///      Referral bonus = miningReward * referral bonus bps (if eligible)
     ///      Total reward = miningReward + referral bonus + streak bonus (additive)
+    ///      Streak is maintained if this finish occurs within `streakWindow` of the previous finish (finish-to-finish).
     /// @return multipliedReward The amount of DIAMANTE tokens earned from mining, multiplied by ORO amount.
     /// @return referralBonusAmount The amount of DIAMANTE tokens earned as a referral bonus.
     /// @return streakBonusAmount The amount of DIAMANTE tokens earned as a streak bonus.
@@ -675,8 +680,8 @@ contract DiamanteMineV1_2 is Initializable, UUPSUpgradeable, OwnableUpgradeable,
         referralBonusBps = newReferralBonusBps;
     }
 
-    /// @notice Sets the streak window.
-    /// @param newWindow The new streak window in seconds.
+    /// @notice Sets the streak window (finish-to-finish).
+    /// @param newWindow The maximum time between the last finish and the next finish to maintain a streak, in seconds.
     function setStreakWindow(uint40 newWindow) external onlyOwner {
         streakWindow = newWindow;
     }
